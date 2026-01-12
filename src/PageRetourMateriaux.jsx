@@ -27,13 +27,15 @@ export default function PageRetourMateriaux({ onGoTableau }) {
   const [calibre, setCalibre] = useState("");
   const [qteStock, setQteStock] = useState("");
 
-  const [mode, setMode] = useState("free"); // free | line | text
+  // ✅ default = line
+  const [mode, setMode] = useState("line"); // free | line | text
+
   const [clearSignal, setClearSignal] = useState(0);
+  const [undoSignal, setUndoSignal] = useState(0);
 
-  // ✅ NOUVEAU: épaisseur du crayon (1x / 2x / 3x)
-  const [penSize, setPenSize] = useState(1);
+  // ✅ crayon toujours gros
+  const penSize = 5;
 
-  // ✅ Ici c’est maintenant une MINIATURE WebP (dataURL) très légère
   const [dernierDessinPng, setDernierDessinPng] = useState(null);
 
   const [articles, setArticles] = useState([]);
@@ -41,11 +43,18 @@ export default function PageRetourMateriaux({ onGoTableau }) {
 
   const [isSaving, setIsSaving] = useState(false);
 
-  const modeLabel =
-    mode === "free" ? "Mode: Dessin libre" : mode === "line" ? "Mode: Ligne droite" : "Mode: Texte";
+  function setModeLine() {
+    setMode("line");
+  }
+  function setModeFree() {
+    setMode("free");
+  }
+  function setModeText() {
+    setMode("text");
+  }
 
-  function toggleMode() {
-    setMode((m) => (m === "free" ? "line" : m === "line" ? "text" : "free"));
+  function undoLast() {
+    setUndoSignal((n) => n + 1);
   }
 
   function ajouterArticle() {
@@ -57,7 +66,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
 
     const qStr = String(qteStock).trim();
     const qNum = Number(qStr);
-    if (!qStr || Number.isNaN(qNum) || qNum <= 0) return alert("Entre une quantité valide (> 0).");
+    if (!qStr || Number.isNaN(qNum) || qNum <= 0) return alert("Entre une quantité valide (> 0 ).");
 
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -69,7 +78,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
       materiel,
       calibre,
       quantite: qNum,
-      dessinPng: dernierDessinPng || null, // dataURL webp compressé
+      dessinPng: dernierDessinPng || null,
     };
 
     setArticles((prev) => [newItem, ...prev]);
@@ -104,9 +113,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
         let dessinUrl = null;
         let dessinPath = null;
 
-        // ✅ upload MINIATURE (WebP/JPEG dataURL) => très léger
         if (a.dessinPng) {
-          // extension selon le dataURL
           const isWebp = a.dessinPng.startsWith("data:image/webp");
           const ext = isWebp ? "webp" : "jpg";
           const contentType = isWebp ? "image/webp" : "image/jpeg";
@@ -139,19 +146,21 @@ export default function PageRetourMateriaux({ onGoTableau }) {
       setSelectedId(null);
 
       alert("✅ Enregistré dans Firebase (banqueMoulures).");
-
-      // Option: aller direct au tableau
       onGoTableau?.();
     } catch (err) {
       console.error("🔥 Firebase error FULL:", err);
-      console.error("🔥 code:", err?.code);
-      console.error("🔥 message:", err?.message);
-
       alert("❌ Firebase: " + (err?.code || "no-code") + " — " + (err?.message || String(err)));
     } finally {
       setIsSaving(false);
     }
   }
+
+  const btnModeStyle = (active) => ({
+    width: "100%",
+    border: "1px solid #ddd",
+    background: active ? "#e8f0ff" : "#fff",
+    fontWeight: active ? 800 : 700,
+  });
 
   return (
     <div className="pageRM pageRM--full">
@@ -176,7 +185,6 @@ export default function PageRetourMateriaux({ onGoTableau }) {
       </div>
 
       <div className="mainRow mainRow--full">
-        {/* ✅ wrapper pour centrer toute la rangée */}
         <div className="mainRowInner">
           {/* LEFT */}
           <div className="leftPanel">
@@ -239,47 +247,44 @@ export default function PageRetourMateriaux({ onGoTableau }) {
           <div className="canvasWrap canvasWrap--full">
             <DessinCanvas
               mode={mode}
-              onModeChange={setMode}
               clearSignal={clearSignal}
+              undoSignal={undoSignal}
               width={760}
               height={520}
               onExportPNG={(dataUrl) => setDernierDessinPng(dataUrl)}
-              penSize={penSize} // ✅ IMPORTANT
+              penSize={penSize}
             />
           </div>
 
           {/* RIGHT */}
           <div className="rightPanel">
-            <button className="btn" onClick={toggleMode}>
-              {modeLabel}
-            </button>
-
-            {/* ✅ NOUVEAU: Épaisseur du crayon */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <button className="btn" onClick={() => setPenSize(5)}>
-                    ✏️ Crayon
-                </button>
-                </div>
+              <button className="btn" onClick={setModeLine} style={btnModeStyle(mode === "line")}>
+                📏 Ligne droite
+              </button>
 
+              <button className="btn" onClick={setModeFree} style={btnModeStyle(mode === "free")}>
+                ✏️ Dessin libre
+              </button>
 
-            <button className="btn" onClick={() => setClearSignal((n) => n + 1)}>
-              🗑️ Effacer dessin
-            </button>
+              <button className="btn" onClick={setModeText} style={btnModeStyle(mode === "text")}>
+                📝 Ajouter texte
+              </button>
 
-            <button className="btn" onClick={() => setMode("text")}>
-              📝 Ajouter texte
-            </button>
+              <button className="btn" onClick={() => setUndoSignal((n) => n + 1)}>
+                ↩ Retour
+              </button>
 
-            <button className="btn" onClick={() => onGoTableau?.()}>
-              ↩ Retour
-            </button>
+              <button className="btn" onClick={() => setClearSignal((n) => n + 1)}>
+                🗑️ Effacer dessin
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Bottom buttons */}
       <div className="bottomRow bottomRow--full">
-        {/* ✅ wrapper pour centrer la rangée des boutons */}
         <div className="bottomRowInner">
           <div className="bottomLeftBtns">
             <button className="btnGreen" onClick={ajouterArticle}>
@@ -301,10 +306,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
       {/* Table zone */}
       <div className="tableZone tableZone--center">
         <div className="tableBox tableBox--wide">
-          <div
-            className="tableHeader"
-            style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 120px" }}
-          >
+          <div className="tableHeader" style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 120px" }}>
             <div>Projet</div>
             <div>Date</div>
             <div>Catégorie</div>
@@ -314,7 +316,6 @@ export default function PageRetourMateriaux({ onGoTableau }) {
             <div>Dessin</div>
           </div>
 
-          {/* ✅ scroll du tableau (optionnel selon ton CSS) */}
           <div className="tableScroll tableScroll--fixed">
             {articles.length === 0 ? (
               <div className="tableBody" style={{ padding: 10 }}>
@@ -338,14 +339,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
                       fontSize: 13,
                     }}
                   >
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {a.projet}
                     </div>
                     <div>{a.date}</div>
