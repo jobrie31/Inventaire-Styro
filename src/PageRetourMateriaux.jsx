@@ -1,3 +1,4 @@
+// src/PageRetourMateriaux.jsx
 import React, { useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
@@ -16,79 +17,154 @@ function formatDateYYYYMMDD(d) {
 const MATERIELS = ["Blanc Embossé", "Blanc Lisse", "Galvanisé", "Grade B"];
 const CALIBRES = Array.from({ length: (28 - 12) / 2 + 1 }, (_, i) => String(12 + i * 2));
 
-export default function PageRetourMateriaux({ onGoTableau }) {
+// ✅ Panneaux
+const PANNEAUX_TYPES = ["", "Neuf", "Grade B", "Roxul"];
+const PANNEAUX_EPAISSEURS = ["", "3", "4", "5", "6", "7", "8"];
+const PANNEAUX_FABRICANTS = ["", "Norbec", "Melt-Span", "Awip", "Kingspan", "Autre"];
+
+function isPosNumberStr(x) {
+  const s = String(x ?? "").trim();
+  if (!s) return false;
+  const n = Number(s);
+  return !Number.isNaN(n) && n > 0;
+}
+
+export default function PageRetourMateriaux() {
   const today = useMemo(() => formatDateYYYYMMDD(new Date()), []);
   const [date, setDate] = useState(today);
   const [projet, setProjet] = useState("");
 
   const [categorie, setCategorie] = useState("Moulures");
 
+  // ---- Moulures ----
   const [materiel, setMateriel] = useState("");
   const [calibre, setCalibre] = useState("");
+
+  // ---- Panneaux ----
+  const [pType, setPType] = useState("");
+  const [pEpaisseur, setPEpaisseur] = useState("");
+  const [pFabricant, setPFabricant] = useState("");
+  const [pFabricantAutre, setPFabricantAutre] = useState("");
+  const [pLongPieds, setPLongPieds] = useState("");
+  const [pLongPouces, setPLongPouces] = useState("");
+  const [pLargeurPouces, setPLargeurPouces] = useState("");
+  const [pFaceExt, setPFaceExt] = useState("");
+  const [pFaceInt, setPFaceInt] = useState("");
+
+  // ---- Commun ----
   const [qteStock, setQteStock] = useState("");
 
-  // ✅ default = line
-  const [mode, setMode] = useState("line"); // free | line | text
-
+  // ✅ dessin (moulures seulement)
+  const [mode, setMode] = useState("line");
   const [clearSignal, setClearSignal] = useState(0);
   const [undoSignal, setUndoSignal] = useState(0);
-
-  // ✅ crayon toujours gros
   const penSize = 5;
-
   const [dernierDessinPng, setDernierDessinPng] = useState(null);
 
   const [articles, setArticles] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-
   const [isSaving, setIsSaving] = useState(false);
 
-  function setModeLine() {
-    setMode("line");
-  }
-  function setModeFree() {
-    setMode("free");
-  }
-  function setModeText() {
-    setMode("text");
+  function resetForm() {
+    setQteStock("");
+    setSelectedId(null);
+
+    // moulures
+    setMateriel("");
+    setCalibre("");
+    setDernierDessinPng(null);
+    setClearSignal((n) => n + 1);
+
+    // panneaux
+    setPType("");
+    setPEpaisseur("");
+    setPFabricant("");
+    setPFabricantAutre("");
+    setPLongPieds("");
+    setPLongPouces("");
+    setPLargeurPouces("");
+    setPFaceExt("");
+    setPFaceInt("");
   }
 
-  function undoLast() {
-    setUndoSignal((n) => n + 1);
+  function onChangeCategorie(next) {
+    setCategorie(next);
+    resetForm();
   }
 
   function ajouterArticle() {
     const p = projet.trim();
     if (!p) return alert("Entre un projet.");
-    if (categorie !== "Moulures") return alert("La catégorie doit être Moulures.");
-    if (!materiel) return alert("Choisis un matériel.");
-    if (!calibre) return alert("Choisis un calibre.");
 
-    const qStr = String(qteStock).trim();
-    const qNum = Number(qStr);
-    if (!qStr || Number.isNaN(qNum) || qNum <= 0) return alert("Entre une quantité valide (> 0 ).");
+    if (!isPosNumberStr(qteStock)) return alert("Entre une quantité valide (> 0).");
+    const qNum = Number(String(qteStock).trim());
 
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const newItem = {
-      id,
-      projet: p,
-      date,
-      categorie: "Moulures",
-      materiel,
-      calibre,
-      quantite: qNum,
-      dessinPng: dernierDessinPng || null,
-    };
+    if (categorie === "Moulures") {
+      if (!materiel) return alert("Choisis un matériel.");
+      if (!calibre) return alert("Choisis un calibre.");
 
-    setArticles((prev) => [newItem, ...prev]);
+      const newItem = {
+        id,
+        projet: p,
+        date,
+        categorie: "Moulures",
+        quantite: qNum,
+        dessinPng: dernierDessinPng || null,
+        materiel,
+        calibre,
+      };
 
-    setMateriel("");
-    setCalibre("");
-    setQteStock("");
-    setDernierDessinPng(null);
-    setClearSignal((n) => n + 1);
-    setSelectedId(null);
+      setArticles((prev) => [newItem, ...prev]);
+      resetForm();
+      return;
+    }
+
+    if (categorie === "Panneaux") {
+      if (!pType) return alert("Choisis un type.");
+      if (!pEpaisseur) return alert("Choisis une épaisseur.");
+      if (!pFabricant) return alert("Choisis un fabricant.");
+
+      const fabricantFinal = pFabricant === "Autre" ? String(pFabricantAutre || "").trim() : pFabricant;
+      if (pFabricant === "Autre" && !fabricantFinal) return alert("Entre le fabricant (Autre).");
+
+      if (!isPosNumberStr(pLongPieds)) return alert("Entre une longueur (pieds) valide (> 0).");
+      const lp = Number(String(pLongPieds).trim());
+
+      const longPoucesStr = String(pLongPouces ?? "").trim();
+      const longPoucesNum = longPoucesStr === "" ? 0 : Number(longPoucesStr);
+      if (Number.isNaN(longPoucesNum) || longPoucesNum < 0 || longPoucesNum >= 12) {
+        return alert("Longueur (pouces) doit être entre 0 et 11.");
+      }
+
+      if (!isPosNumberStr(pLargeurPouces)) return alert("Entre une largeur (pouces) valide (> 0).");
+      const largeurNum = Number(String(pLargeurPouces).trim());
+
+      const newItem = {
+        id,
+        projet: p,
+        date,
+        categorie: "Panneaux",
+        quantite: qNum,
+        dessinPng: null,
+
+        type: pType,
+        epaisseurPouces: pEpaisseur,
+        fabricant: fabricantFinal,
+        longueurPieds: lp,
+        longueurPouces: longPoucesNum,
+        largeurPouces: largeurNum,
+        faceExterieure: pFaceExt.trim(),
+        faceInterieure: pFaceInt.trim(),
+      };
+
+      setArticles((prev) => [newItem, ...prev]);
+      resetForm();
+      return;
+    }
+
+    alert("Catégorie non gérée (Seulement Moulures/Panneaux).");
   }
 
   function retirerArticle() {
@@ -113,12 +189,17 @@ export default function PageRetourMateriaux({ onGoTableau }) {
         let dessinUrl = null;
         let dessinPath = null;
 
-        if (a.dessinPng) {
+        const isPanneaux = a.categorie === "Panneaux";
+        const storageFolder = isPanneaux ? "banquePanneaux" : "banqueMoulures";
+        const firestoreCollection = isPanneaux ? "banquePanneaux" : "banqueMoulures";
+
+        // ✅ upload dessin seulement moulures
+        if (!isPanneaux && a.dessinPng) {
           const isWebp = a.dessinPng.startsWith("data:image/webp");
           const ext = isWebp ? "webp" : "jpg";
           const contentType = isWebp ? "image/webp" : "image/jpeg";
 
-          dessinPath = `banqueMoulures/${a.id}.${ext}`;
+          dessinPath = `${storageFolder}/${a.id}.${ext}`;
           const storageRef = ref(storage, dessinPath);
 
           await uploadString(storageRef, a.dessinPng, "data_url", {
@@ -129,24 +210,38 @@ export default function PageRetourMateriaux({ onGoTableau }) {
           dessinUrl = await getDownloadURL(storageRef);
         }
 
-        await addDoc(collection(db, "banqueMoulures"), {
+        const payload = {
           projet: a.projet,
           date: a.date,
           categorie: a.categorie,
-          materiel: a.materiel,
-          calibre: a.calibre,
           quantite: a.quantite,
           dessinUrl,
           dessinPath,
           createdAt: serverTimestamp(),
-        });
+        };
+
+        if (a.categorie === "Moulures") {
+          payload.materiel = a.materiel;
+          payload.calibre = a.calibre;
+        }
+
+        if (a.categorie === "Panneaux") {
+          payload.type = a.type;
+          payload.epaisseurPouces = a.epaisseurPouces;
+          payload.fabricant = a.fabricant;
+          payload.longueurPieds = a.longueurPieds;
+          payload.longueurPouces = a.longueurPouces;
+          payload.largeurPouces = a.largeurPouces;
+          payload.faceExterieure = a.faceExterieure || "";
+          payload.faceInterieure = a.faceInterieure || "";
+        }
+
+        await addDoc(collection(db, firestoreCollection), payload);
       }
 
       setArticles([]);
       setSelectedId(null);
-
-      alert("✅ Enregistré dans Firebase (banqueMoulures).");
-      onGoTableau?.();
+      alert("✅ Enregistré dans Firebase.");
     } catch (err) {
       console.error("🔥 Firebase error FULL:", err);
       alert("❌ Firebase: " + (err?.code || "no-code") + " — " + (err?.message || String(err)));
@@ -162,25 +257,26 @@ export default function PageRetourMateriaux({ onGoTableau }) {
     fontWeight: active ? 800 : 700,
   });
 
+  const title = categorie === "Panneaux" ? "Ajout Panneaux" : "Ajout Moulures";
+
+  function detailsLabel(a) {
+    if (a.categorie === "Moulures") return `${a.materiel || ""} — Calibre ${a.calibre || ""}`;
+    if (a.categorie === "Panneaux") {
+      const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
+      return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${a.fabricant || ""} — L:${len} x l:${a.largeurPouces || ""}" — Ext:${a.faceExterieure || "-"} / Int:${a.faceInterieure || "-"}`;
+    }
+    return "—";
+  }
+
+  const showDessin = categorie === "Moulures";
+
   return (
     <div className="pageRM pageRM--full">
-      <div className="topBar topBar--full">
-        <div className="leftLinks">
-          <button
-            className="btn"
-            style={{ width: 180, height: 34 }}
-            onClick={() => (onGoTableau ? onGoTableau() : alert("Navigation"))}
-          >
-            Navigation
-          </button>
-          <span>Aide</span>
-        </div>
-        <div />
-      </div>
+      {/* ✅ PLUS DE NAVIGATION ICI */}
 
-      <div className="titleRow titleRow--full">
+      <div className="titleRow titleRow--full" style={{ paddingTop: 12 }}>
         <div />
-        <div className="bigTitle">Ajout Moulures</div>
+        <div className="bigTitle">{title}</div>
         <div />
       </div>
 
@@ -199,7 +295,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
             </div>
 
             <label>Catégorie:</label>
-            <select className="selectYellow" value={categorie} onChange={(e) => setCategorie(e.target.value)}>
+            <select className="selectYellow" value={categorie} onChange={(e) => onChangeCategorie(e.target.value)}>
               <option>Moulures</option>
               <option>Panneaux</option>
               <option>Quincaillerie</option>
@@ -208,78 +304,195 @@ export default function PageRetourMateriaux({ onGoTableau }) {
 
             <div style={{ height: 18 }} />
 
-            <div className="fieldRow" style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Matériel:</div>
-              <select className="selectGray" value={materiel} onChange={(e) => setMateriel(e.target.value)}>
-                <option value=""></option>
-                {MATERIELS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* M O U L U R E S */}
+            {categorie === "Moulures" && (
+              <>
+                <div className="fieldRow" style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Matériel:</div>
+                  <select className="selectGray" value={materiel} onChange={(e) => setMateriel(e.target.value)}>
+                    <option value=""></option>
+                    {MATERIELS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="fieldRow" style={{ marginTop: 24 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Calibre:</div>
-              <select className="selectGray" value={calibre} onChange={(e) => setCalibre(e.target.value)}>
-                <option value=""></option>
-                {CALIBRES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div className="fieldRow" style={{ marginTop: 24 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Calibre:</div>
+                  <select className="selectGray" value={calibre} onChange={(e) => setCalibre(e.target.value)}>
+                    <option value=""></option>
+                    {CALIBRES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
 
+            {/* P A N N E A U X */}
+            {categorie === "Panneaux" && (
+              <>
+                <div className="fieldRow" style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Type:</div>
+                  <select className="selectGray" value={pType} onChange={(e) => setPType(e.target.value)}>
+                    {PANNEAUX_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 18 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Épaisseur:</div>
+                  <select className="selectGray" value={pEpaisseur} onChange={(e) => setPEpaisseur(e.target.value)}>
+                    {PANNEAUX_EPAISSEURS.map((ep) => (
+                      <option key={ep} value={ep}>
+                        {ep}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontWeight: 700 }}>Pouces</div>
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 18, alignItems: "center" }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Fabricant:</div>
+                  <select
+                    className="selectGray"
+                    value={pFabricant}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPFabricant(v);
+                      if (v !== "Autre") setPFabricantAutre("");
+                    }}
+                  >
+                    {PANNEAUX_FABRICANTS.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {pFabricant === "Autre" && (
+                  <div className="fieldRow" style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}></div>
+                    <input
+                      className="inputWide"
+                      style={{ width: 200 }}
+                      placeholder="Écrire fabricant..."
+                      value={pFabricantAutre}
+                      onChange={(e) => setPFabricantAutre(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div className="fieldRow" style={{ marginTop: 20, gap: 8 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Longueur:</div>
+                  <input
+                    className="inputSmall"
+                    style={{ width: 70 }}
+                    value={pLongPieds}
+                    onChange={(e) => setPLongPieds(e.target.value)}
+                    inputMode="numeric"
+                  />
+                  <div style={{ fontWeight: 700 }}>Pieds</div>
+                  <input
+                    className="inputSmall"
+                    style={{ width: 70 }}
+                    value={pLongPouces}
+                    onChange={(e) => setPLongPouces(e.target.value)}
+                    inputMode="numeric"
+                  />
+                  <div style={{ fontWeight: 700 }}>Pouces</div>
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 18 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Largeur:</div>
+                  <input
+                    className="inputSmall"
+                    style={{ width: 110 }}
+                    value={pLargeurPouces}
+                    onChange={(e) => setPLargeurPouces(e.target.value)}
+                    inputMode="numeric"
+                  />
+                  <div style={{ fontWeight: 700 }}>Pouces</div>
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 18 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Face extérieure:</div>
+                  <input
+                    className="inputWide"
+                    style={{ width: 180 }}
+                    value={pFaceExt}
+                    onChange={(e) => setPFaceExt(e.target.value)}
+                  />
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Face intérieure:</div>
+                  <input
+                    className="inputWide"
+                    style={{ width: 180 }}
+                    value={pFaceInt}
+                    onChange={(e) => setPFaceInt(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Quantité */}
             <div className="fieldRow" style={{ marginTop: 28 }}>
               <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Quantité en stock:</div>
-              <input
-                className="inputSmall"
-                value={qteStock}
-                onChange={(e) => setQteStock(e.target.value)}
-                inputMode="numeric"
+              <input className="inputSmall" value={qteStock} onChange={(e) => setQteStock(e.target.value)} inputMode="numeric" />
+            </div>
+          </div>
+
+          {/* CENTER (moulures seulement) */}
+          {showDessin ? (
+            <div className="canvasWrap canvasWrap--full">
+              <DessinCanvas
+                mode={mode}
+                clearSignal={clearSignal}
+                undoSignal={undoSignal}
+                width={760}
+                height={520}
+                onExportPNG={(dataUrl) => setDernierDessinPng(dataUrl)}
+                penSize={penSize}
               />
             </div>
-          </div>
+          ) : (
+            <div className="canvasWrap canvasWrap--full" />
+          )}
 
-          {/* CENTER */}
-          <div className="canvasWrap canvasWrap--full">
-            <DessinCanvas
-              mode={mode}
-              clearSignal={clearSignal}
-              undoSignal={undoSignal}
-              width={760}
-              height={520}
-              onExportPNG={(dataUrl) => setDernierDessinPng(dataUrl)}
-              penSize={penSize}
-            />
-          </div>
-
-          {/* RIGHT */}
-          <div className="rightPanel">
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button className="btn" onClick={setModeLine} style={btnModeStyle(mode === "line")}>
-                📏 Ligne droite
-              </button>
-
-              <button className="btn" onClick={setModeFree} style={btnModeStyle(mode === "free")}>
-                ✏️ Dessin libre
-              </button>
-
-              <button className="btn" onClick={setModeText} style={btnModeStyle(mode === "text")}>
-                📝 Ajouter texte
-              </button>
-
-              <button className="btn" onClick={() => setUndoSignal((n) => n + 1)}>
-                ↩ Retour
-              </button>
-
-              <button className="btn" onClick={() => setClearSignal((n) => n + 1)}>
-                🗑️ Effacer dessin
-              </button>
+          {/* RIGHT (moulures seulement) */}
+          {showDessin ? (
+            <div className="rightPanel">
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <button className="btn" onClick={() => setMode("line")} style={{ width: "100%", border: "1px solid #ddd", background: mode === "line" ? "#e8f0ff" : "#fff", fontWeight: mode === "line" ? 800 : 700 }}>
+                  📏 Ligne droite
+                </button>
+                <button className="btn" onClick={() => setMode("free")} style={{ width: "100%", border: "1px solid #ddd", background: mode === "free" ? "#e8f0ff" : "#fff", fontWeight: mode === "free" ? 800 : 700 }}>
+                  ✏️ Dessin libre
+                </button>
+                <button className="btn" onClick={() => setMode("text")} style={{ width: "100%", border: "1px solid #ddd", background: mode === "text" ? "#e8f0ff" : "#fff", fontWeight: mode === "text" ? 800 : 700 }}>
+                  📝 Ajouter texte
+                </button>
+                <button className="btn" onClick={() => setUndoSignal((n) => n + 1)}>
+                  ↩ Retour
+                </button>
+                <button className="btn" onClick={() => setClearSignal((n) => n + 1)}>
+                  🗑️ Effacer dessin
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="rightPanel" />
+          )}
         </div>
       </div>
 
@@ -306,21 +519,18 @@ export default function PageRetourMateriaux({ onGoTableau }) {
       {/* Table zone */}
       <div className="tableZone tableZone--center">
         <div className="tableBox tableBox--wide">
-          <div className="tableHeader" style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 120px" }}>
+          <div className="tableHeader" style={{ gridTemplateColumns: "180px 120px 140px 1fr 110px 120px" }}>
             <div>Projet</div>
             <div>Date</div>
             <div>Catégorie</div>
-            <div>Matériel</div>
-            <div>Calibre</div>
+            <div>Détails</div>
             <div>Quantité</div>
             <div>Dessin</div>
           </div>
 
           <div className="tableScroll tableScroll--fixed">
             {articles.length === 0 ? (
-              <div className="tableBody" style={{ padding: 10 }}>
-                (Tableau vide pour l’instant — ajoute un article)
-              </div>
+              <div className="tableBody" style={{ padding: 10 }}>(Tableau vide pour l’instant — ajoute un article)</div>
             ) : (
               articles.map((a) => {
                 const selected = a.id === selectedId;
@@ -330,22 +540,27 @@ export default function PageRetourMateriaux({ onGoTableau }) {
                     onClick={() => setSelectedId(a.id)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "180px 120px 140px 160px 110px 110px 120px",
+                      gridTemplateColumns: "180px 120px 140px 1fr 110px 120px",
                       alignItems: "center",
                       borderBottom: "1px solid #eee",
                       background: selected ? "#dfefff" : "#fff",
                       cursor: "pointer",
                       padding: "6px 8px",
                       fontSize: 13,
+                      gap: 6,
                     }}
                   >
-                    <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {a.projet}
-                    </div>
+                    <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.projet}</div>
                     <div>{a.date}</div>
                     <div>{a.categorie}</div>
-                    <div>{a.materiel}</div>
-                    <div style={{ textAlign: "center" }}>{a.calibre}</div>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {a.categorie === "Moulures"
+                        ? `${a.materiel || ""} — Calibre ${a.calibre || ""}`
+                        : (() => {
+                            const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
+                            return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${a.fabricant || ""} — L:${len} x l:${a.largeurPouces || ""}" — Ext:${a.faceExterieure || "-"} / Int:${a.faceInterieure || "-"}`;
+                          })()}
+                    </div>
                     <div style={{ textAlign: "center", fontWeight: 700 }}>{a.quantite}</div>
                     <div style={{ display: "flex", justifyContent: "center" }}>
                       {a.dessinPng ? (
@@ -354,13 +569,7 @@ export default function PageRetourMateriaux({ onGoTableau }) {
                           alt="dessin"
                           loading="lazy"
                           decoding="async"
-                          style={{
-                            width: 96,
-                            height: 44,
-                            objectFit: "contain",
-                            border: "1px solid #ddd",
-                            background: "#fff",
-                          }}
+                          style={{ width: 96, height: 44, objectFit: "contain", border: "1px solid #ddd", background: "#fff" }}
                         />
                       ) : (
                         <span style={{ color: "#999" }}>—</span>
