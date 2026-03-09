@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import { db } from "./firebaseConfig";
+import { CLIENT_ID } from "./appClient";
 import {
   collection,
   onSnapshot,
@@ -16,21 +17,22 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [banque, setBanque] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
 
-  // ✅ Modal image
   const [modalUrl, setModalUrl] = useState(null);
 
-  // ✅ Mode création réquisition
   const [reqOpen, setReqOpen] = useState(false);
-  const [reqSelected, setReqSelected] = useState(() => new Set()); // ids banqueMoulures
-  const [reqStep, setReqStep] = useState(1); // 1 = sélection, 2 = détails
-  const [reqQtyById, setReqQtyById] = useState({}); // { [id]: number }
+  const [reqSelected, setReqSelected] = useState(() => new Set());
+  const [reqStep, setReqStep] = useState(1);
+  const [reqQtyById, setReqQtyById] = useState({});
   const [reqProjetEnvoye, setReqProjetEnvoye] = useState("");
   const [reqNote, setReqNote] = useState("");
   const [reqSaving, setReqSaving] = useState(false);
   const [reqError, setReqError] = useState("");
 
   useEffect(() => {
-    const q = query(collection(db, "banqueMoulures"), orderBy("createdAt", "desc"));
+    const q = query(
+      collection(db, "clients", CLIENT_ID, "banqueMoulures"),
+      orderBy("createdAt", "desc")
+    );
     const unsub = onSnapshot(
       q,
       (snap) => setBanque(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
@@ -39,7 +41,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     return () => unsub();
   }, []);
 
-  // ✅ ESC (image + requisition)
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key === "Escape") {
@@ -49,7 +50,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     }
     if (modalUrl || reqOpen) window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalUrl, reqOpen]);
 
   function openReq() {
@@ -112,7 +112,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
     setReqSaving(true);
     try {
-      const counterRef = doc(db, "_counters", "reqMoulures");
+      const counterRef = doc(db, "clients", CLIENT_ID, "_counters", "reqMoulures");
+
       const { reqId, reqNum } = await runTransaction(db, async (tx) => {
         const snap = await tx.get(counterRef);
         const next = snap.exists() ? Number(snap.data()?.next ?? 1) : 1;
@@ -125,7 +126,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
       const items = reqSelectedList.map((it) => ({
         banqueId: it.id,
-        // Snapshot au moment de la réquisition
         projetSource: it.projet || "",
         date: it.date || "",
         categorie: it.categorie || "",
@@ -135,12 +135,12 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         quantiteDemande: Number(reqQtyById[it.id] ?? 1) || 1,
       }));
 
-      const reqRef = doc(db, "requisitionsMoulures", reqId);
+      const reqRef = doc(db, "clients", CLIENT_ID, "requisitionsMoulures", reqId);
       await setDoc(reqRef, {
         reqId,
         reqNum,
         type: "moulures",
-        status: "brouillon", // plus tard page Réquisition
+        status: "brouillon",
         projetEnvoye: String(reqProjetEnvoye || "").trim(),
         note: String(reqNote || "").trim(),
         items,
@@ -149,11 +149,10 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       });
 
       closeReq();
-      // ✅ Aller direct dans la page Réquisition + focus sur la requête créée
+
       if (typeof onGoRequisition === "function") {
         onGoRequisition(reqId);
       } else {
-        // fallback si tu n'as pas encore branché le callback
         alert(`Réquisition créée: ${reqId}`);
       }
     } catch (e) {
@@ -189,7 +188,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         >
           <span>Tableau Moulure</span>
 
-          {/* ✅ Bouton bleu */}
           <button
             onClick={openReq}
             style={{
@@ -300,7 +298,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         </div>
       </div>
 
-      {/* ✅ MODAL IMAGE */}
       {modalUrl && (
         <div
           style={{
@@ -360,7 +357,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         </div>
       )}
 
-      {/* ✅ MODAL RÉQUISITION */}
       {reqOpen && (
         <div
           style={{
@@ -389,7 +385,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               border: "1px solid rgba(0,0,0,0.08)",
             }}
           >
-            {/* Header */}
             <div
               style={{
                 padding: "14px 16px",
@@ -420,7 +415,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               </button>
             </div>
 
-            {/* Body */}
             <div style={{ padding: 16 }}>
               {reqStep === 1 ? (
                 <>
@@ -520,7 +514,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               ) : (
                 <>
                   <div style={{ display: "grid", gap: 12 }}>
-                    {/* Quantités */}
                     <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
                       <div style={{ fontWeight: 900, marginBottom: 8 }}>Quantités demandées</div>
                       <div style={{ display: "grid", gap: 8 }}>
@@ -575,7 +568,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       </div>
                     </div>
 
-                    {/* Projet à envoyer + note */}
                     <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
                       <div style={{ fontWeight: 900, marginBottom: 8 }}>Projet à envoyer + note</div>
 
@@ -631,7 +623,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               )}
             </div>
 
-            {/* Footer buttons */}
             <div
               style={{
                 padding: 14,

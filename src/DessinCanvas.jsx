@@ -97,13 +97,13 @@ export default function DessinCanvas({
   function getDisplayCtx() {
     const c = displayRef.current;
     if (!c) return null;
-    return c.getContext("2d");
+    return c.getContext("2d", { willReadFrequently: true });
   }
 
   function getBaseCtx() {
     const c = baseRef.current;
     if (!c) return null;
-    return c.getContext("2d");
+    return c.getContext("2d", { willReadFrequently: true });
   }
 
   function applyStroke(ctx) {

@@ -4,6 +4,7 @@ import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
 
 import { db, storage } from "./firebaseConfig";
+import { CLIENT_ID } from "./appClient";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 
@@ -148,7 +149,6 @@ export default function PageRetourMateriaux() {
         categorie: "Panneaux",
         quantite: qNum,
         dessinPng: null,
-
         type: pType,
         epaisseurPouces: pEpaisseur,
         fabricant: fabricantFinal,
@@ -199,7 +199,7 @@ export default function PageRetourMateriaux() {
           const ext = isWebp ? "webp" : "jpg";
           const contentType = isWebp ? "image/webp" : "image/jpeg";
 
-          dessinPath = `${storageFolder}/${a.id}.${ext}`;
+          dessinPath = `clients/${CLIENT_ID}/${storageFolder}/${a.id}.${ext}`;
           const storageRef = ref(storage, dessinPath);
 
           await uploadString(storageRef, a.dessinPng, "data_url", {
@@ -236,7 +236,10 @@ export default function PageRetourMateriaux() {
           payload.faceInterieure = a.faceInterieure || "";
         }
 
-        await addDoc(collection(db, firestoreCollection), payload);
+        await addDoc(
+          collection(db, "clients", CLIENT_ID, firestoreCollection),
+          payload
+        );
       }
 
       setArticles([]);
@@ -250,30 +253,11 @@ export default function PageRetourMateriaux() {
     }
   }
 
-  const btnModeStyle = (active) => ({
-    width: "100%",
-    border: "1px solid #ddd",
-    background: active ? "#e8f0ff" : "#fff",
-    fontWeight: active ? 800 : 700,
-  });
-
   const title = categorie === "Panneaux" ? "Ajout Panneaux" : "Ajout Moulures";
-
-  function detailsLabel(a) {
-    if (a.categorie === "Moulures") return `${a.materiel || ""} — Calibre ${a.calibre || ""}`;
-    if (a.categorie === "Panneaux") {
-      const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
-      return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${a.fabricant || ""} — L:${len} x l:${a.largeurPouces || ""}" — Ext:${a.faceExterieure || "-"} / Int:${a.faceInterieure || "-"}`;
-    }
-    return "—";
-  }
-
   const showDessin = categorie === "Moulures";
 
   return (
     <div className="pageRM pageRM--full">
-      {/* ✅ PLUS DE NAVIGATION ICI */}
-
       <div className="titleRow titleRow--full" style={{ paddingTop: 12 }}>
         <div />
         <div className="bigTitle">{title}</div>
@@ -282,7 +266,6 @@ export default function PageRetourMateriaux() {
 
       <div className="mainRow mainRow--full">
         <div className="mainRowInner">
-          {/* LEFT */}
           <div className="leftPanel">
             <div className="fieldRow" style={{ marginTop: 6 }}>
               <div style={{ fontSize: 18, fontWeight: 700, width: 60 }}>Date:</div>
@@ -304,7 +287,6 @@ export default function PageRetourMateriaux() {
 
             <div style={{ height: 18 }} />
 
-            {/* M O U L U R E S */}
             {categorie === "Moulures" && (
               <>
                 <div className="fieldRow" style={{ marginTop: 10 }}>
@@ -333,7 +315,6 @@ export default function PageRetourMateriaux() {
               </>
             )}
 
-            {/* P A N N E A U X */}
             {categorie === "Panneaux" && (
               <>
                 <div className="fieldRow" style={{ marginTop: 10 }}>
@@ -445,14 +426,12 @@ export default function PageRetourMateriaux() {
               </>
             )}
 
-            {/* Quantité */}
             <div className="fieldRow" style={{ marginTop: 28 }}>
               <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Quantité en stock:</div>
               <input className="inputSmall" value={qteStock} onChange={(e) => setQteStock(e.target.value)} inputMode="numeric" />
             </div>
           </div>
 
-          {/* CENTER (moulures seulement) */}
           {showDessin ? (
             <div className="canvasWrap canvasWrap--full">
               <DessinCanvas
@@ -469,7 +448,6 @@ export default function PageRetourMateriaux() {
             <div className="canvasWrap canvasWrap--full" />
           )}
 
-          {/* RIGHT (moulures seulement) */}
           {showDessin ? (
             <div className="rightPanel">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -496,7 +474,6 @@ export default function PageRetourMateriaux() {
         </div>
       </div>
 
-      {/* Bottom buttons */}
       <div className="bottomRow bottomRow--full">
         <div className="bottomRowInner">
           <div className="bottomLeftBtns">
@@ -516,7 +493,6 @@ export default function PageRetourMateriaux() {
         </div>
       </div>
 
-      {/* Table zone */}
       <div className="tableZone tableZone--center">
         <div className="tableBox tableBox--wide">
           <div className="tableHeader" style={{ gridTemplateColumns: "180px 120px 140px 1fr 110px 120px" }}>

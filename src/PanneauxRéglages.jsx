@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "./firebaseConfig";
+import { CLIENT_ID } from "./appClient";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 
 function normStr(s) {
@@ -38,7 +39,10 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function PanneauxRéglages({ onClose }) {
-  const refDoc = useMemo(() => doc(db, "reglages", "panneaux"), []);
+  const refDoc = useMemo(
+    () => doc(db, "clients", CLIENT_ID, "reglages", "panneaux"),
+    []
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -66,9 +70,11 @@ export default function PanneauxRéglages({ onClose }) {
     const id = `r-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setRules((prev) => [{ id, type: "", epaisseurs: [], fabricants: [], price: 0 }, ...prev]);
   }
+
   function delRule(id) {
     setRules((prev) => prev.filter((r) => r.id !== id));
   }
+
   function updateRule(id, patch) {
     setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
@@ -121,7 +127,7 @@ export default function PanneauxRéglages({ onClose }) {
         padding: 16,
         fontFamily: "Arial, sans-serif",
       }}
-      onClick={onClose} // ✅ clic sur le fond ferme
+      onClick={onClose}
     >
       <div
         style={{
@@ -133,7 +139,7 @@ export default function PanneauxRéglages({ onClose }) {
           borderRadius: 8,
           boxShadow: "0 12px 30px rgba(0,0,0,0.25)",
         }}
-        onClick={(e) => e.stopPropagation()} // ✅ empêche fermeture si clique dedans
+        onClick={(e) => e.stopPropagation()}
       >
         <div
           style={{
@@ -161,16 +167,28 @@ export default function PanneauxRéglages({ onClose }) {
 
           <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 220px 1fr 220px 1fr", gap: 10, alignItems: "center" }}>
             <div style={{ fontWeight: 700 }}>Vente minimum (÷)</div>
-            <input className="inputSmall" style={{ width: "100%" }} value={String(multipliers.venteMin ?? "")}
-              onChange={(e) => setMultipliers((m) => ({ ...m, venteMin: parseNumFR(e.target.value) }))} />
+            <input
+              className="inputSmall"
+              style={{ width: "100%" }}
+              value={String(multipliers.venteMin ?? "")}
+              onChange={(e) => setMultipliers((m) => ({ ...m, venteMin: parseNumFR(e.target.value) }))}
+            />
 
             <div style={{ fontWeight: 700 }}>Suggéré sans coupe (÷)</div>
-            <input className="inputSmall" style={{ width: "100%" }} value={String(multipliers.sugSans ?? "")}
-              onChange={(e) => setMultipliers((m) => ({ ...m, sugSans: parseNumFR(e.target.value) }))} />
+            <input
+              className="inputSmall"
+              style={{ width: "100%" }}
+              value={String(multipliers.sugSans ?? "")}
+              onChange={(e) => setMultipliers((m) => ({ ...m, sugSans: parseNumFR(e.target.value) }))}
+            />
 
             <div style={{ fontWeight: 700 }}>Suggéré avec coupe (÷)</div>
-            <input className="inputSmall" style={{ width: "100%" }} value={String(multipliers.sugAvec ?? "")}
-              onChange={(e) => setMultipliers((m) => ({ ...m, sugAvec: parseNumFR(e.target.value) }))} />
+            <input
+              className="inputSmall"
+              style={{ width: "100%" }}
+              value={String(multipliers.sugAvec ?? "")}
+              onChange={(e) => setMultipliers((m) => ({ ...m, sugAvec: parseNumFR(e.target.value) }))}
+            />
           </div>
 
           <div style={{ height: 16 }} />
@@ -183,7 +201,16 @@ export default function PanneauxRéglages({ onClose }) {
           </div>
 
           <div style={{ marginTop: 10, border: "1px solid #ddd" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "170px 190px 280px 140px 110px", background: "#f3f3f3", fontWeight: 900, padding: "8px 10px", borderBottom: "1px solid #ddd" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "170px 190px 280px 140px 110px",
+                background: "#f3f3f3",
+                fontWeight: 900,
+                padding: "8px 10px",
+                borderBottom: "1px solid #ddd",
+              }}
+            >
               <div>Type</div>
               <div>Épaisseurs</div>
               <div>Fabricants</div>
@@ -192,17 +219,50 @@ export default function PanneauxRéglages({ onClose }) {
             </div>
 
             {rules.map((r) => (
-              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "170px 190px 280px 140px 110px", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #eee" }}>
-                <input className="inputWide" style={{ width: "100%", height: 28 }} value={r.type ?? ""} onChange={(e) => updateRule(r.id, { type: e.target.value })} />
+              <div
+                key={r.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "170px 190px 280px 140px 110px",
+                  gap: 8,
+                  alignItems: "center",
+                  padding: "8px 10px",
+                  borderBottom: "1px solid #eee",
+                }}
+              >
+                <input
+                  className="inputWide"
+                  style={{ width: "100%", height: 28 }}
+                  value={r.type ?? ""}
+                  onChange={(e) => updateRule(r.id, { type: e.target.value })}
+                />
 
-                <input className="inputWide" style={{ width: "100%", height: 28 }} value={joinList(r.epaisseurs ?? [])}
-                  onChange={(e) => updateRule(r.id, { epaisseurs: splitList(e.target.value).map(parseNumFR).filter((x) => Number.isFinite(x) && x > 0) })} />
+                <input
+                  className="inputWide"
+                  style={{ width: "100%", height: 28 }}
+                  value={joinList(r.epaisseurs ?? [])}
+                  onChange={(e) =>
+                    updateRule(r.id, {
+                      epaisseurs: splitList(e.target.value)
+                        .map(parseNumFR)
+                        .filter((x) => Number.isFinite(x) && x > 0),
+                    })
+                  }
+                />
 
-                <input className="inputWide" style={{ width: "100%", height: 28 }} value={joinList(r.fabricants ?? [])}
-                  onChange={(e) => updateRule(r.id, { fabricants: splitList(e.target.value) })} />
+                <input
+                  className="inputWide"
+                  style={{ width: "100%", height: 28 }}
+                  value={joinList(r.fabricants ?? [])}
+                  onChange={(e) => updateRule(r.id, { fabricants: splitList(e.target.value) })}
+                />
 
-                <input className="inputWide" style={{ width: "100%", height: 28 }} value={String(r.price ?? "")}
-                  onChange={(e) => updateRule(r.id, { price: parseNumFR(e.target.value) })} />
+                <input
+                  className="inputWide"
+                  style={{ width: "100%", height: 28 }}
+                  value={String(r.price ?? "")}
+                  onChange={(e) => updateRule(r.id, { price: parseNumFR(e.target.value) })}
+                />
 
                 <button className="btnRed" style={{ width: "100%", height: 32 }} onClick={() => delRule(r.id)}>
                   Supprimer

@@ -1,12 +1,12 @@
 // src/Requisition.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "./firebaseConfig";
+import { CLIENT_ID } from "./appClient";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 
 function fmtTS(ts) {
   try {
     if (!ts) return "";
-    // Firestore Timestamp -> Date
     const d = ts.toDate ? ts.toDate() : new Date(ts);
     return d.toLocaleString("fr-CA", {
       year: "numeric",
@@ -25,7 +25,10 @@ export default function Requisition({ onRetour }) {
   const [selectedId, setSelectedId] = useState(null);
 
   useEffect(() => {
-    const q = query(collection(db, "requisitionsMoulures"), orderBy("createdAt", "desc"));
+    const q = query(
+      collection(db, "clients", CLIENT_ID, "requisitionsMoulures"),
+      orderBy("createdAt", "desc")
+    );
     const unsub = onSnapshot(
       q,
       (snap) => setRows(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
@@ -108,7 +111,6 @@ export default function Requisition({ onRetour }) {
         </div>
       </div>
 
-      {/* Détails simples en bas (optionnel) */}
       {selected ? (
         <div style={{ padding: 12 }}>
           <div

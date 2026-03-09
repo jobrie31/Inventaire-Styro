@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
 
 import Login from "./Login.jsx";
@@ -21,7 +21,11 @@ export default function App() {
   }, []);
 
   if (user === undefined) {
-    return <div style={{ padding: 24, fontFamily: "Arial, sans-serif" }}>Chargement...</div>;
+    return (
+      <div style={{ padding: 24, fontFamily: "Arial, sans-serif" }}>
+        Chargement...
+      </div>
+    );
   }
 
   if (user === null) {
@@ -37,13 +41,76 @@ export default function App() {
     cursor: "pointer",
   });
 
+  const topBtn = {
+    height: 34,
+    padding: "0 14px",
+    border: "1px solid #9a9a9a",
+    background: "#e6e6e6",
+    fontWeight: 800,
+    cursor: "pointer",
+  };
+
+  const connectedLabel = user?.email ? user.email : "Utilisateur";
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // onAuthStateChanged => user=null => retour Login
+    } catch (e) {
+      console.error("Erreur signOut:", e);
+      alert("Impossible de se déconnecter. Réessaie.");
+    }
+  };
+
+  // ✅ Hauteur demandée
+  const TOPBAR_H = 40;
+
   return (
     <div style={{ minHeight: "100vh", background: "#f2f2f2" }}>
-      {/* ✅ MENU TOP */}
+      {/* ✅ BARRE TOP (HAUTEUR 200px) */}
       <div
         style={{
           position: "sticky",
           top: 0,
+          zIndex: 60,
+          background: "#f2f2f2",
+          borderBottom: "1px solid #d5d5d5",
+          height: TOPBAR_H, // ✅ 200px de hauteur
+          padding: "0 12px",
+          fontFamily: "Arial, sans-serif",
+          display: "flex",
+          alignItems: "center", // centre verticalement le contenu
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr", // gauche | centre | droite
+            alignItems: "center",
+          }}
+        >
+          <div /> {/* gauche vide */}
+
+          {/* ✅ CONNECTÉ AU CENTRE */}
+          <div style={{ textAlign: "center", fontWeight: 800, fontSize: 18 }}>
+            Connecté: <span style={{ fontWeight: 600 }}>{connectedLabel}</span>
+          </div>
+
+          {/* ✅ DÉCONNEXION À DROITE COMPLET */}
+          <div style={{ justifySelf: "end" }}>
+            <button style={topBtn} onClick={handleLogout}>
+              Déconnexion
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ✅ MENU TOP */}
+      <div
+        style={{
+          position: "sticky",
+          top: TOPBAR_H, // ✅ juste sous la barre 200px
           zIndex: 50,
           background: "#f2f2f2",
           borderBottom: "1px solid #d5d5d5",
@@ -60,16 +127,25 @@ export default function App() {
           Ajout
         </button>
 
-        <button style={tabBtn(route === "moulures")} onClick={() => setRoute("moulures")}>
+        <button
+          style={tabBtn(route === "moulures")}
+          onClick={() => setRoute("moulures")}
+        >
           Tableau moulures
         </button>
 
-        <button style={tabBtn(route === "panneaux")} onClick={() => setRoute("panneaux")}>
+        <button
+          style={tabBtn(route === "panneaux")}
+          onClick={() => setRoute("panneaux")}
+        >
           Tableau panneaux
         </button>
 
         {/* ✅ NOUVEAU */}
-        <button style={tabBtn(route === "requisition")} onClick={() => setRoute("requisition")}>
+        <button
+          style={tabBtn(route === "requisition")}
+          onClick={() => setRoute("requisition")}
+        >
           Réquisition
         </button>
       </div>

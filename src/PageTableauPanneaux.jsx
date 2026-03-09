@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import { db } from "./firebaseConfig";
+import { CLIENT_ID } from "./appClient";
 import {
   collection,
   onSnapshot,
@@ -68,7 +69,7 @@ function prixUnitaire(row, settings) {
     const price = Number(r.price);
     return Number.isFinite(price) ? price : null;
   }
-  return null; // pas de match => vide
+  return null;
 }
 
 export default function PageTableauPanneaux() {
@@ -85,7 +86,10 @@ export default function PageTableauPanneaux() {
   const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
-    const q = query(collection(db, "banquePanneaux"), orderBy("createdAt", "desc"));
+    const q = query(
+      collection(db, "clients", CLIENT_ID, "banquePanneaux"),
+      orderBy("createdAt", "desc")
+    );
     return onSnapshot(
       q,
       (snap) => {
@@ -101,7 +105,7 @@ export default function PageTableauPanneaux() {
   }, []);
 
   useEffect(() => {
-    const ref = doc(db, "reglages", "panneaux");
+    const ref = doc(db, "clients", CLIENT_ID, "reglages", "panneaux");
     return onSnapshot(
       ref,
       (snap) => {
@@ -135,7 +139,6 @@ export default function PageTableauPanneaux() {
     });
   }, [rows, fProjet, fType, fEp, fFab]);
 
-  // ✅ colonnes responsive
   const cols =
     "1.1fr .8fr .7fr .55fr .85fr .95fr .55fr .7fr .95fr .95fr .7fr .55fr .85fr .85fr .95fr .95fr .75fr";
 
@@ -145,7 +148,7 @@ export default function PageTableauPanneaux() {
     whiteSpace: "nowrap",
     minWidth: 0,
     padding: "6px 6px",
-    borderRight: "1px solid #d9d9d9", // ✅ lignes verticales
+    borderRight: "1px solid #d9d9d9",
   };
 
   const lastCell = {
@@ -181,7 +184,7 @@ export default function PageTableauPanneaux() {
 
     setDeletingId(rowId);
     try {
-      await deleteDoc(doc(db, "banquePanneaux", rowId));
+      await deleteDoc(doc(db, "clients", CLIENT_ID, "banquePanneaux", rowId));
     } catch (e) {
       console.error(e);
       alert("❌ Suppression impossible: " + (e?.message || String(e)));
@@ -205,7 +208,6 @@ export default function PageTableauPanneaux() {
         <div />
       </div>
 
-      {/* Filtres */}
       <div style={{ width: "100%", display: "flex", justifyContent: "center", padding: "0 14px 10px 14px" }}>
         <div style={{ width: "min(1600px, 100%)", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
           <div>
@@ -254,10 +256,8 @@ export default function PageTableauPanneaux() {
         </div>
       </div>
 
-      {/* Tableau */}
       <div className="tableZone tableZone--center" style={{ paddingTop: 0 }}>
         <div className="tableBox tableBox--wide" style={{ height: "calc(100vh - 220px)", overflowX: "hidden" }}>
-          {/* Header */}
           <div
             className="tableHeader"
             style={{
@@ -315,8 +315,7 @@ export default function PageTableauPanneaux() {
                 const psAvec = divOrNull(prix, mult?.sugAvec || 0.85);
 
                 const longTxt = r.longueurPieds != null ? `${r.longueurPieds},${String(r.longueurPouces ?? 0)}` : "";
-
-                const rowBg = i % 2 === 1 ? "#f4f4f4" : "#fff"; // ✅ 1 ligne sur 2 gris pâle
+                const rowBg = i % 2 === 1 ? "#f4f4f4" : "#fff";
 
                 return (
                   <div
