@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "inventaire-styro"
-  }
+  },
+  "targets": {
+    "planification-styro": {
+      "hosting": {
+        "inventaire": [
+          "inventaire-shop-styro"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

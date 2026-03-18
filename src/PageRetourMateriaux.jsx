@@ -438,8 +438,8 @@ export default function PageRetourMateriaux() {
                 mode={mode}
                 clearSignal={clearSignal}
                 undoSignal={undoSignal}
-                width={760}
-                height={520}
+                width={620}
+                height={380}
                 onExportPNG={(dataUrl) => setDernierDessinPng(dataUrl)}
                 penSize={penSize}
               />
@@ -487,7 +487,7 @@ export default function PageRetourMateriaux() {
 
           <div className="bottomRightBtn">
             <button className="btnBlue" onClick={enregistrerDansExcel} disabled={isSaving}>
-              {isSaving ? "Enregistrement..." : "Enregistrer dans Excel"}
+              {isSaving ? "Enregistrement..." : "Enregistrer dans Firebase"}
             </button>
           </div>
         </div>
@@ -495,7 +495,7 @@ export default function PageRetourMateriaux() {
 
       <div className="tableZone tableZone--center">
         <div className="tableBox tableBox--wide">
-          <div className="tableHeader" style={{ gridTemplateColumns: "180px 120px 140px 1fr 110px 120px" }}>
+          <div className="tableHeader">
             <div>Projet</div>
             <div>Date</div>
             <div>Catégorie</div>
@@ -516,7 +516,7 @@ export default function PageRetourMateriaux() {
                     onClick={() => setSelectedId(a.id)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "180px 120px 140px 1fr 110px 120px",
+                      gridTemplateColumns: "170px 110px 120px minmax(260px, 1fr) 90px 110px",
                       alignItems: "center",
                       borderBottom: "1px solid #eee",
                       background: selected ? "#dfefff" : "#fff",
