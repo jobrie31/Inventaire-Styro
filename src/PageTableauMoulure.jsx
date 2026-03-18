@@ -11,6 +11,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  deleteDoc,
 } from "firebase/firestore";
 
 export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
@@ -27,6 +28,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [reqNote, setReqNote] = useState("");
   const [reqSaving, setReqSaving] = useState(false);
   const [reqError, setReqError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     const q = query(
@@ -97,6 +99,24 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       }
       return next;
     });
+  }
+
+  async function supprimerMoulure(id) {
+    if (!id) return;
+
+    const ok = window.confirm("Veux-tu vraiment supprimer cette moulure ?");
+    if (!ok) return;
+
+    setDeletingId(id);
+    try {
+      await deleteDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id));
+      if (selectedId === id) setSelectedId(null);
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de la suppression.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function createReq() {
@@ -171,7 +191,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
             ↩ Retour (Ajout)
           </button>
         </div>
-        <div style={{ fontWeight: 700 }}>Total: {banque.length}</div>
       </div>
 
       <div className="titleRow titleRow--full">
@@ -214,7 +233,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         <div className="tableBox tableBox--full">
           <div
             className="tableHeader"
-            style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px" }}
+            style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 80px" }}
           >
             <div>Projet</div>
             <div>Date</div>
@@ -223,6 +242,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
             <div>Calibre</div>
             <div>Quantité</div>
             <div>Dessin</div>
+            <div style={{ textAlign: "center" }}>Actions</div>
           </div>
 
           <div className="tableScroll">
@@ -240,7 +260,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     onClick={() => setSelectedId(a.id)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px",
+                      gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 80px",
                       alignItems: "center",
                       borderBottom: "1px solid #eee",
                       background: selected ? "#dfefff" : "#fff",
@@ -259,6 +279,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     >
                       {a.projet || ""}
                     </div>
+
                     <div>{a.date || ""}</div>
                     <div>{a.categorie || ""}</div>
                     <div>{a.materiel || ""}</div>
@@ -289,6 +310,35 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       ) : (
                         <span style={{ color: "#999" }}>—</span>
                       )}
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "center" }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          supprimerMoulure(a.id);
+                        }}
+                        disabled={deletingId === a.id}
+                        title="Supprimer"
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 999,
+                          border: "1px solid #d33",
+                          background: deletingId === a.id ? "#ffd6d6" : "#ff5c5c",
+                          color: "#fff",
+                          fontWeight: 900,
+                          fontSize: 18,
+                          cursor: deletingId === a.id ? "default" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {deletingId === a.id ? "…" : "✕"}
+                      </button>
                     </div>
                   </div>
                 );

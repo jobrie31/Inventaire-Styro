@@ -1,8 +1,15 @@
 .pageRM {
-  min-height: 100vh;
   background: #f2f2f2;
   font-family: Arial, Helvetica, sans-serif;
   color: #111;
+}
+
+.pageRM--full {
+  width: 100vw;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 .topBar {
@@ -15,6 +22,12 @@
 .topBar .leftLinks {
   display: flex;
   gap: 18px;
+}
+
+.topBar--full,
+.titleRow--full {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .titleRow {
@@ -40,6 +53,23 @@
   align-items: start;
 }
 
+.mainRow--full {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 12px 14px;
+  box-sizing: border-box;
+}
+
+.mainRowInner {
+  width: min(1500px, 100%);
+  display: grid;
+  grid-template-columns: 360px 1fr 240px;
+  gap: 16px;
+  align-items: start;
+  box-sizing: border-box;
+}
+
 .leftPanel label {
   display: block;
   font-weight: 700;
@@ -61,6 +91,7 @@
   padding: 0 6px;
   border: 1px solid #bdbdbd;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .inputWide {
@@ -70,6 +101,7 @@
   padding: 0 8px;
   border: 1px solid #bdbdbd;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .selectYellow {
@@ -80,6 +112,7 @@
   border: 1px solid #777;
   background: #fff200;
   padding: 0 8px;
+  box-sizing: border-box;
 }
 
 .selectGray {
@@ -89,12 +122,50 @@
   border: 1px solid #9e9e9e;
   background: #dcdcdc;
   padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.neutralBox {
+  width: 320px;
+  min-height: 70px;
+  border: 1px solid #cfcfcf;
+  background: #fafafa;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  box-sizing: border-box;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .canvasWrap {
   display: flex;
   justify-content: center;
   padding-top: 6px;
+}
+
+.canvasWrap--full {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 390px;
+}
+
+.canvasPlaceholder {
+  width: 620px;
+  height: 380px;
+  border: 1px dashed #c0c0c0;
+  background: #fafafa;
+  color: #777;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  box-sizing: border-box;
 }
 
 .rightPanel {
@@ -126,9 +197,30 @@
   margin-top: 10px;
 }
 
+.bottomRow--full {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 6px 14px 0 14px;
+  box-sizing: border-box;
+}
+
+.bottomRowInner {
+  width: min(1500px, 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-sizing: border-box;
+}
+
 .bottomLeftBtns {
   display: flex;
   gap: 10px;
+}
+
+.bottomRightBtn {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .btnGreen {
@@ -151,11 +243,6 @@
   cursor: pointer;
 }
 
-.bottomRightBtn {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .btnBlue {
   width: 240px;
   height: 46px;
@@ -167,24 +254,59 @@
   cursor: pointer;
 }
 
+/* ===== TABLEAU ===== */
+
 .tableZone {
   padding: 0 18px 18px 18px;
+}
+
+.tableZone--center {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 8px 14px 14px 14px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
 }
 
 .tableBox {
   background: #fff;
   border: 1px solid #cfcfcf;
-  height: 210px;
-  overflow: auto;
+  box-sizing: border-box;
+}
+
+.tableBox--wide {
+  width: min(1500px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #cfcfcf;
+  box-sizing: border-box;
+  flex: 0 0 auto;
 }
 
 .tableHeader {
   display: grid;
-  grid-template-columns: 140px 140px 140px 170px 170px 140px 140px;
+  grid-template-columns: 170px 110px 120px minmax(260px, 1fr) 90px 110px;
   font-size: 13px;
   font-weight: 700;
   border-bottom: 1px solid #e0e0e0;
   padding: 8px 10px;
+  background: #fff;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.tableScroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.tableScroll--fixed {
+  height: 150px;
+  padding: 6px;
 }
 
 .tableBody {
@@ -192,134 +314,3 @@
   color: #777;
   font-size: 13px;
 }
-
-
-/* ✅ Page plein écran */
-.pageRM--full {
-  width: 100vw;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-/* Top + titre prennent toute la largeur */
-.topBar--full,
-.titleRow--full {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-/* ✅ Zone table = prend tout l’espace restant + centre la table */
-.tableZone--center {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  justify-content: center;   /* centre horizontal */
-  align-items: stretch;      /* étire vertical */
-  padding: 10px 14px;
-  box-sizing: border-box;
-}
-
-/* ✅ Table = centrée et large (prend “la page”, mais garde une limite clean) */
-.tableBox--full {
-  width: min(1400px, 100%);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-/* ✅ Scroll juste sur le body, header reste visible */
-.tableScroll {
-  flex: 1;
-  overflow: auto;
-  padding: 6px;
-  box-sizing: border-box;
-}
-
-
-/* ✅ Page plein écran */
-.pageRM--full{
-  width:100vw;
-  min-height:100vh;
-  display:flex;
-  flex-direction:column;
-  box-sizing:border-box;
-}
-
-/* Top + titre full width */
-.topBar--full,
-.titleRow--full{
-  width:100%;
-  box-sizing:border-box;
-}
-
-/* ✅ Main row centré dans un container */
-.mainRow--full{
-  width:100%;
-  display:flex;
-  justify-content:center;
-  padding:12px 14px;
-  box-sizing:border-box;
-}
-
-.mainRowInner{
-  width:min(1500px, 100%);
-  display:grid;
-  grid-template-columns: 360px 1fr 240px;
-  gap:16px;
-  align-items:start;
-  box-sizing:border-box;
-}
-
-.canvasWrap--full{
-  display:flex;
-  justify-content:center;
-  align-items:flex-start;
-}
-
-/* ✅ Boutons du bas centrés */
-.bottomRow--full{
-  width:100%;
-  display:flex;
-  justify-content:center;
-  padding:6px 14px 0 14px;
-  box-sizing:border-box;
-}
-
-.bottomRowInner{
-  width:min(1500px, 100%);
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  box-sizing:border-box;
-}
-
-/* ✅ Table centrée + largeur max */
-.tableZone--center{
-  width:100%;
-  display:flex;
-  justify-content:center;
-  padding:8px 14px 14px 14px;
-  box-sizing:border-box;
-}
-
-.tableBox--wide{
-  width:min(1500px, 100%);
-  box-sizing:border-box;
-  display:flex;
-  flex-direction:column;
-}
-
-/* ✅ Scroll sur le body du tableau */
-.tableScroll{
-  overflow:auto;
-  box-sizing:border-box;
-}
-
-.tableScroll--fixed{
-  height: 240px; /* ajuste (ex: 220 / 280) */
-  padding: 6px;
-}
-

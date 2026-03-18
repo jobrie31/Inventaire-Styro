@@ -48,7 +48,6 @@ export default function Requisition({ onRetour }) {
           </button>
         </div>
         <div style={{ fontWeight: 900 }}>Réquisition</div>
-        <div style={{ fontWeight: 700 }}>Total: {rows.length}</div>
       </div>
 
       <div className="tableZone tableZone--center">

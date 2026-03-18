@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
@@ -7,12 +6,11 @@ import Login from "./Login.jsx";
 import PageRetourMateriaux from "./PageRetourMateriaux.jsx";
 import PageTableauMoulure from "./PageTableauMoulure.jsx";
 import PageTableauPanneaux from "./PageTableauPanneaux.jsx";
-
-// ✅ NOUVEAU
 import Requisition from "./Requisition.jsx";
+import Historique from "./Historique.jsx";
 
 export default function App() {
-  const [route, setRoute] = useState("ajout"); // ajout | moulures | panneaux | requisition
+  const [route, setRoute] = useState("ajout"); // ajout | moulures | panneaux | requisition | historique
   const [user, setUser] = useState(undefined); // undefined = loading
 
   useEffect(() => {
@@ -42,11 +40,13 @@ export default function App() {
   });
 
   const topBtn = {
-    height: 34,
-    padding: "0 14px",
+    height: 16,
+    padding: "0 10px",
     border: "1px solid #9a9a9a",
     background: "#e6e6e6",
-    fontWeight: 800,
+    fontWeight: 600,
+    fontSize: 10,
+    lineHeight: 1,
     cursor: "pointer",
   };
 
@@ -55,19 +55,25 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // onAuthStateChanged => user=null => retour Login
     } catch (e) {
       console.error("Erreur signOut:", e);
       alert("Impossible de se déconnecter. Réessaie.");
     }
   };
 
-  // ✅ Hauteur demandée
-  const TOPBAR_H = 40;
+  const TOPBAR_H = 20;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f2f2f2" }}>
-      {/* ✅ BARRE TOP (HAUTEUR 200px) */}
+    <div
+      style={{
+        height: "100dvh",
+        background: "#f2f2f2",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* BARRE TOP */}
       <div
         style={{
           position: "sticky",
@@ -75,29 +81,30 @@ export default function App() {
           zIndex: 60,
           background: "#f2f2f2",
           borderBottom: "1px solid #d5d5d5",
-          height: TOPBAR_H, // ✅ 200px de hauteur
+          height: TOPBAR_H,
           padding: "0 12px",
           fontFamily: "Arial, sans-serif",
           display: "flex",
-          alignItems: "center", // centre verticalement le contenu
+          alignItems: "center",
+          width: "100%",
+          boxSizing: "border-box",
+          flexShrink: 0,
         }}
       >
         <div
           style={{
             width: "100%",
             display: "grid",
-            gridTemplateColumns: "1fr auto 1fr", // gauche | centre | droite
+            gridTemplateColumns: "1fr auto 1fr",
             alignItems: "center",
           }}
         >
-          <div /> {/* gauche vide */}
+          <div />
 
-          {/* ✅ CONNECTÉ AU CENTRE */}
-          <div style={{ textAlign: "center", fontWeight: 800, fontSize: 18 }}>
-            Connecté: <span style={{ fontWeight: 600 }}>{connectedLabel}</span>
+          <div style={{ textAlign: "center", fontWeight: 600, fontSize: 11 }}>
+            Connecté: <span style={{ fontWeight: 500 }}>{connectedLabel}</span>
           </div>
 
-          {/* ✅ DÉCONNEXION À DROITE COMPLET */}
           <div style={{ justifySelf: "end" }}>
             <button style={topBtn} onClick={handleLogout}>
               Déconnexion
@@ -106,11 +113,11 @@ export default function App() {
         </div>
       </div>
 
-      {/* ✅ MENU TOP */}
+      {/* MENU TOP */}
       <div
         style={{
           position: "sticky",
-          top: TOPBAR_H, // ✅ juste sous la barre 200px
+          top: TOPBAR_H,
           zIndex: 50,
           background: "#f2f2f2",
           borderBottom: "1px solid #d5d5d5",
@@ -121,6 +128,9 @@ export default function App() {
           justifyContent: "center",
           fontFamily: "Arial, sans-serif",
           flexWrap: "wrap",
+          width: "100%",
+          boxSizing: "border-box",
+          flexShrink: 0,
         }}
       >
         <button style={tabBtn(route === "ajout")} onClick={() => setRoute("ajout")}>
@@ -141,28 +151,45 @@ export default function App() {
           Tableau panneaux
         </button>
 
-        {/* ✅ NOUVEAU */}
         <button
           style={tabBtn(route === "requisition")}
           onClick={() => setRoute("requisition")}
         >
           Réquisition
         </button>
+
+        <button
+          style={tabBtn(route === "historique")}
+          onClick={() => setRoute("historique")}
+        >
+          Historique
+        </button>
       </div>
 
-      {/* ✅ PAGES */}
-      {route === "moulures" ? (
-        <PageTableauMoulure
-          onRetour={() => setRoute("ajout")}
-          onGoRequisition={() => setRoute("requisition")}
-        />
-      ) : route === "panneaux" ? (
-        <PageTableauPanneaux onRetour={() => setRoute("ajout")} />
-      ) : route === "requisition" ? (
-        <Requisition onRetour={() => setRoute("ajout")} />
-      ) : (
-        <PageRetourMateriaux />
-      )}
+      {/* CONTENU */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+        }}
+      >
+        {route === "moulures" ? (
+          <PageTableauMoulure
+            onRetour={() => setRoute("ajout")}
+            onGoRequisition={() => setRoute("requisition")}
+          />
+        ) : route === "panneaux" ? (
+          <PageTableauPanneaux onRetour={() => setRoute("ajout")} />
+        ) : route === "requisition" ? (
+          <Requisition onRetour={() => setRoute("ajout")} />
+        ) : route === "historique" ? (
+          <Historique onRetour={() => setRoute("ajout")} />
+        ) : (
+          <PageRetourMateriaux />
+        )}
+      </div>
     </div>
   );
 }

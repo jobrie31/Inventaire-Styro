@@ -1,4 +1,3 @@
-// src/PageRetourMateriaux.jsx
 import React, { useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
@@ -35,7 +34,8 @@ export default function PageRetourMateriaux() {
   const [date, setDate] = useState(today);
   const [projet, setProjet] = useState("");
 
-  const [categorie, setCategorie] = useState("Moulures");
+  // ✅ neutre au départ
+  const [categorie, setCategorie] = useState("");
 
   // ---- Moulures ----
   const [materiel, setMateriel] = useState("");
@@ -66,6 +66,23 @@ export default function PageRetourMateriaux() {
   const [selectedId, setSelectedId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const articleCols = "170px 110px 120px minmax(260px, 1fr) 90px 110px";
+
+  const articleBaseCell = {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+    padding: "6px 8px",
+    borderRight: "1px solid #e6e6e6",
+    boxSizing: "border-box",
+  };
+
+  const articleLastCell = {
+    ...articleBaseCell,
+    borderRight: "none",
+  };
+
   function resetForm() {
     setQteStock("");
     setSelectedId(null);
@@ -74,6 +91,7 @@ export default function PageRetourMateriaux() {
     setMateriel("");
     setCalibre("");
     setDernierDessinPng(null);
+    setMode("line");
     setClearSignal((n) => n + 1);
 
     // panneaux
@@ -94,6 +112,10 @@ export default function PageRetourMateriaux() {
   }
 
   function ajouterArticle() {
+    if (!categorie) {
+      return alert("Choisis une catégorie pour commencer.");
+    }
+
     const p = projet.trim();
     if (!p) return alert("Entre un projet.");
 
@@ -127,10 +149,16 @@ export default function PageRetourMateriaux() {
       if (!pEpaisseur) return alert("Choisis une épaisseur.");
       if (!pFabricant) return alert("Choisis un fabricant.");
 
-      const fabricantFinal = pFabricant === "Autre" ? String(pFabricantAutre || "").trim() : pFabricant;
-      if (pFabricant === "Autre" && !fabricantFinal) return alert("Entre le fabricant (Autre).");
+      const fabricantFinal =
+        pFabricant === "Autre" ? String(pFabricantAutre || "").trim() : pFabricant;
 
-      if (!isPosNumberStr(pLongPieds)) return alert("Entre une longueur (pieds) valide (> 0).");
+      if (pFabricant === "Autre" && !fabricantFinal) {
+        return alert("Entre le fabricant (Autre).");
+      }
+
+      if (!isPosNumberStr(pLongPieds)) {
+        return alert("Entre une longueur (pieds) valide (> 0).");
+      }
       const lp = Number(String(pLongPieds).trim());
 
       const longPoucesStr = String(pLongPouces ?? "").trim();
@@ -139,7 +167,9 @@ export default function PageRetourMateriaux() {
         return alert("Longueur (pouces) doit être entre 0 et 11.");
       }
 
-      if (!isPosNumberStr(pLargeurPouces)) return alert("Entre une largeur (pouces) valide (> 0).");
+      if (!isPosNumberStr(pLargeurPouces)) {
+        return alert("Entre une largeur (pouces) valide (> 0).");
+      }
       const largeurNum = Number(String(pLargeurPouces).trim());
 
       const newItem = {
@@ -236,10 +266,7 @@ export default function PageRetourMateriaux() {
           payload.faceInterieure = a.faceInterieure || "";
         }
 
-        await addDoc(
-          collection(db, "clients", CLIENT_ID, firestoreCollection),
-          payload
-        );
+        await addDoc(collection(db, "clients", CLIENT_ID, firestoreCollection), payload);
       }
 
       setArticles([]);
@@ -253,7 +280,13 @@ export default function PageRetourMateriaux() {
     }
   }
 
-  const title = categorie === "Panneaux" ? "Ajout Panneaux" : "Ajout Moulures";
+  const title =
+    categorie === "Panneaux"
+      ? "Ajout Panneaux"
+      : categorie === "Moulures"
+      ? "Ajout Moulures"
+      : "Ajout matériaux";
+
   const showDessin = categorie === "Moulures";
 
   return (
@@ -267,31 +300,57 @@ export default function PageRetourMateriaux() {
       <div className="mainRow mainRow--full">
         <div className="mainRowInner">
           <div className="leftPanel">
-            <div className="fieldRow" style={{ marginTop: 6 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, width: 60 }}>Date:</div>
-              <input className="inputSmall" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            {/* ✅ Catégorie au-dessus de la date */}
+            <label>Catégorie:</label>
+            <select
+              className="selectYellow"
+              value={categorie}
+              onChange={(e) => onChangeCategorie(e.target.value)}
+            >
+              <option value="">Choisir une catégorie</option>
+              <option value="Moulures">Moulures</option>
+              <option value="Panneaux">Panneaux</option>
+              <option value="Quincaillerie">Quincaillerie</option>
+              <option value="Autre">Autre</option>
+            </select>
+
+            <div className="fieldRow" style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, width: 90 }}>Date:</div>
+              <input
+                className="inputSmall"
+                style={{ width: 125 }}
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
             </div>
 
             <div className="fieldRow" style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, width: 60 }}>Projet:</div>
-              <input className="inputWide" value={projet} onChange={(e) => setProjet(e.target.value)} />
+              <div style={{ fontSize: 18, fontWeight: 700, width: 90 }}>Projet:</div>
+              <input
+                className="inputWide"
+                value={projet}
+                onChange={(e) => setProjet(e.target.value)}
+              />
             </div>
 
-            <label>Catégorie:</label>
-            <select className="selectYellow" value={categorie} onChange={(e) => onChangeCategorie(e.target.value)}>
-              <option>Moulures</option>
-              <option>Panneaux</option>
-              <option>Quincaillerie</option>
-              <option>Autre</option>
-            </select>
-
             <div style={{ height: 18 }} />
+
+            {!categorie && (
+              <div className="neutralBox">
+                Choisis une catégorie pour commencer.
+              </div>
+            )}
 
             {categorie === "Moulures" && (
               <>
                 <div className="fieldRow" style={{ marginTop: 10 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Matériel:</div>
-                  <select className="selectGray" value={materiel} onChange={(e) => setMateriel(e.target.value)}>
+                  <select
+                    className="selectGray"
+                    value={materiel}
+                    onChange={(e) => setMateriel(e.target.value)}
+                  >
                     <option value=""></option>
                     {MATERIELS.map((m) => (
                       <option key={m} value={m}>
@@ -303,7 +362,11 @@ export default function PageRetourMateriaux() {
 
                 <div className="fieldRow" style={{ marginTop: 24 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Calibre:</div>
-                  <select className="selectGray" value={calibre} onChange={(e) => setCalibre(e.target.value)}>
+                  <select
+                    className="selectGray"
+                    value={calibre}
+                    onChange={(e) => setCalibre(e.target.value)}
+                  >
                     <option value=""></option>
                     {CALIBRES.map((c) => (
                       <option key={c} value={c}>
@@ -319,7 +382,11 @@ export default function PageRetourMateriaux() {
               <>
                 <div className="fieldRow" style={{ marginTop: 10 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Type:</div>
-                  <select className="selectGray" value={pType} onChange={(e) => setPType(e.target.value)}>
+                  <select
+                    className="selectGray"
+                    value={pType}
+                    onChange={(e) => setPType(e.target.value)}
+                  >
                     {PANNEAUX_TYPES.map((t) => (
                       <option key={t} value={t}>
                         {t}
@@ -330,7 +397,11 @@ export default function PageRetourMateriaux() {
 
                 <div className="fieldRow" style={{ marginTop: 18 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Épaisseur:</div>
-                  <select className="selectGray" value={pEpaisseur} onChange={(e) => setPEpaisseur(e.target.value)}>
+                  <select
+                    className="selectGray"
+                    value={pEpaisseur}
+                    onChange={(e) => setPEpaisseur(e.target.value)}
+                  >
                     {PANNEAUX_EPAISSEURS.map((ep) => (
                       <option key={ep} value={ep}>
                         {ep}
@@ -405,7 +476,9 @@ export default function PageRetourMateriaux() {
                 </div>
 
                 <div className="fieldRow" style={{ marginTop: 18 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Face extérieure:</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>
+                    Face extérieure:
+                  </div>
                   <input
                     className="inputWide"
                     style={{ width: 180 }}
@@ -415,7 +488,9 @@ export default function PageRetourMateriaux() {
                 </div>
 
                 <div className="fieldRow" style={{ marginTop: 16 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Face intérieure:</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>
+                    Face intérieure:
+                  </div>
                   <input
                     className="inputWide"
                     style={{ width: 180 }}
@@ -426,10 +501,17 @@ export default function PageRetourMateriaux() {
               </>
             )}
 
-            <div className="fieldRow" style={{ marginTop: 28 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Quantité en stock:</div>
-              <input className="inputSmall" value={qteStock} onChange={(e) => setQteStock(e.target.value)} inputMode="numeric" />
-            </div>
+            {!!categorie && (
+              <div className="fieldRow" style={{ marginTop: 28 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Quantité en stock:</div>
+                <input
+                  className="inputSmall"
+                  value={qteStock}
+                  onChange={(e) => setQteStock(e.target.value)}
+                  inputMode="numeric"
+                />
+              </div>
+            )}
           </div>
 
           {showDessin ? (
@@ -445,24 +527,57 @@ export default function PageRetourMateriaux() {
               />
             </div>
           ) : (
-            <div className="canvasWrap canvasWrap--full" />
+            <div className="canvasWrap canvasWrap--full">
+              {!categorie ? <div className="canvasPlaceholder">Choisis une catégorie</div> : <div />}
+            </div>
           )}
 
           {showDessin ? (
             <div className="rightPanel">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <button className="btn" onClick={() => setMode("line")} style={{ width: "100%", border: "1px solid #ddd", background: mode === "line" ? "#e8f0ff" : "#fff", fontWeight: mode === "line" ? 800 : 700 }}>
+                <button
+                  className="btn"
+                  onClick={() => setMode("line")}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    background: mode === "line" ? "#e8f0ff" : "#fff",
+                    fontWeight: mode === "line" ? 800 : 700,
+                  }}
+                >
                   📏 Ligne droite
                 </button>
-                <button className="btn" onClick={() => setMode("free")} style={{ width: "100%", border: "1px solid #ddd", background: mode === "free" ? "#e8f0ff" : "#fff", fontWeight: mode === "free" ? 800 : 700 }}>
+
+                <button
+                  className="btn"
+                  onClick={() => setMode("free")}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    background: mode === "free" ? "#e8f0ff" : "#fff",
+                    fontWeight: mode === "free" ? 800 : 700,
+                  }}
+                >
                   ✏️ Dessin libre
                 </button>
-                <button className="btn" onClick={() => setMode("text")} style={{ width: "100%", border: "1px solid #ddd", background: mode === "text" ? "#e8f0ff" : "#fff", fontWeight: mode === "text" ? 800 : 700 }}>
+
+                <button
+                  className="btn"
+                  onClick={() => setMode("text")}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    background: mode === "text" ? "#e8f0ff" : "#fff",
+                    fontWeight: mode === "text" ? 800 : 700,
+                  }}
+                >
                   📝 Ajouter texte
                 </button>
+
                 <button className="btn" onClick={() => setUndoSignal((n) => n + 1)}>
                   ↩ Retour
                 </button>
+
                 <button className="btn" onClick={() => setClearSignal((n) => n + 1)}>
                   🗑️ Effacer dessin
                 </button>
@@ -487,65 +602,130 @@ export default function PageRetourMateriaux() {
 
           <div className="bottomRightBtn">
             <button className="btnBlue" onClick={enregistrerDansExcel} disabled={isSaving}>
-              {isSaving ? "Enregistrement..." : "Enregistrer dans Firebase"}
+              {isSaving ? "Enregistrement..." : "Enregistrer dans le tableau"}
             </button>
           </div>
         </div>
       </div>
 
       <div className="tableZone tableZone--center">
-        <div className="tableBox tableBox--wide">
-          <div className="tableHeader">
-            <div>Projet</div>
-            <div>Date</div>
-            <div>Catégorie</div>
-            <div>Détails</div>
-            <div>Quantité</div>
-            <div>Dessin</div>
-          </div>
+        <div
+          className="tableBox tableBox--wide"
+          style={{
+            height: 220,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            className="tableScroll"
+            style={{
+              height: "100%",
+              overflowY: "auto",
+              overflowX: "hidden",
+              padding: 0,
+              scrollbarGutter: "stable",
+            }}
+          >
+            <div
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 2,
+                display: "grid",
+                gridTemplateColumns: articleCols,
+                alignItems: "stretch",
+                width: "100%",
+                boxSizing: "border-box",
+                fontSize: 13,
+                fontWeight: 700,
+                borderBottom: "1px solid #e0e0e0",
+                background: "#fff",
+              }}
+            >
+              {["Projet", "Date", "Catégorie", "Détails", "Quantité", "Dessin"].map(
+                (h, idx, arr) => (
+                  <div
+                    key={h}
+                    style={{
+                      ...(idx === arr.length - 1 ? articleLastCell : articleBaseCell),
+                      display: "flex",
+                      alignItems: "center",
+                      minHeight: 40,
+                    }}
+                  >
+                    {h}
+                  </div>
+                )
+              )}
+            </div>
 
-          <div className="tableScroll tableScroll--fixed">
             {articles.length === 0 ? (
-              <div className="tableBody" style={{ padding: 10 }}>(Tableau vide pour l’instant — ajoute un article)</div>
+              <div className="tableBody" style={{ padding: 10 }}>
+                (Tableau vide pour l’instant — ajoute un article)
+              </div>
             ) : (
-              articles.map((a) => {
+              articles.map((a, idx) => {
                 const selected = a.id === selectedId;
+                const rowBg = selected ? "#dfefff" : idx % 2 === 1 ? "#f8f8f8" : "#fff";
+
                 return (
                   <div
                     key={a.id}
                     onClick={() => setSelectedId(a.id)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "170px 110px 120px minmax(260px, 1fr) 90px 110px",
+                      gridTemplateColumns: articleCols,
                       alignItems: "center",
+                      width: "100%",
+                      boxSizing: "border-box",
                       borderBottom: "1px solid #eee",
-                      background: selected ? "#dfefff" : "#fff",
+                      background: rowBg,
                       cursor: "pointer",
-                      padding: "6px 8px",
                       fontSize: 13,
-                      gap: 6,
                     }}
                   >
-                    <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.projet}</div>
-                    <div>{a.date}</div>
-                    <div>{a.categorie}</div>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ ...articleBaseCell, fontWeight: 700 }}>{a.projet}</div>
+                    <div style={articleBaseCell}>{a.date}</div>
+                    <div style={articleBaseCell}>{a.categorie}</div>
+
+                    <div style={articleBaseCell}>
                       {a.categorie === "Moulures"
                         ? `${a.materiel || ""} — Calibre ${a.calibre || ""}`
                         : (() => {
                             const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
-                            return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${a.fabricant || ""} — L:${len} x l:${a.largeurPouces || ""}" — Ext:${a.faceExterieure || "-"} / Int:${a.faceInterieure || "-"}`;
+                            return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${
+                              a.fabricant || ""
+                            } — L:${len} x l:${a.largeurPouces || ""}" — Ext:${
+                              a.faceExterieure || "-"
+                            } / Int:${a.faceInterieure || "-"}`;
                           })()}
                     </div>
-                    <div style={{ textAlign: "center", fontWeight: 700 }}>{a.quantite}</div>
-                    <div style={{ display: "flex", justifyContent: "center" }}>
+
+                    <div style={{ ...articleBaseCell, textAlign: "center", fontWeight: 700 }}>
+                      {a.quantite}
+                    </div>
+
+                    <div
+                      style={{
+                        ...articleLastCell,
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                      }}
+                    >
                       {a.dessinPng ? (
                         <img
                           src={a.dessinPng}
                           alt="dessin"
                           loading="lazy"
                           decoding="async"
-                          style={{ width: 96, height: 44, objectFit: "contain", border: "1px solid #ddd", background: "#fff" }}
+                          style={{
+                            width: 96,
+                            height: 44,
+                            objectFit: "contain",
+                            border: "1px solid #ddd",
+                            background: "#fff",
+                          }}
                         />
                       ) : (
                         <span style={{ color: "#999" }}>—</span>
