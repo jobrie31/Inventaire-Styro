@@ -12,6 +12,7 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import PanneauxRéglages from "./PanneauxRéglages.jsx";
+import zoneTerrainPanneaux from "./assets/zone-terrain-panneaux.png";
 
 function money(n) {
   if (n === null || n === undefined || n === "") return "";
@@ -145,6 +146,7 @@ export default function PageTableauPanneaux() {
   const [loading, setLoading] = useState(true);
 
   const [fProjet, setFProjet] = useState("");
+  const [fSectionCour, setFSectionCour] = useState("");
   const [fType, setFType] = useState("");
   const [fEp, setFEp] = useState("");
   const [fFab, setFFab] = useState("");
@@ -193,15 +195,29 @@ export default function PageTableauPanneaux() {
     () => ["", ...Array.from(new Set(rows.map((r) => r.projet).filter(Boolean))).sort()],
     [rows]
   );
+
+  const sectionsCour = useMemo(
+    () =>
+      [
+        "",
+        ...Array.from(new Set(rows.map((r) => r.sectionCour).filter(Boolean))).sort(
+          (a, b) => Number(a) - Number(b)
+        ),
+      ],
+    [rows]
+  );
+
   const types = useMemo(
     () => ["", ...Array.from(new Set(rows.map((r) => r.type).filter(Boolean))).sort()],
     [rows]
   );
+
   const eps = useMemo(() => {
     const s = new Set();
     rows.forEach((r) => r.epaisseurPouces && s.add(String(r.epaisseurPouces)));
     return ["", ...Array.from(s).sort((a, b) => asFloat(a) - asFloat(b))];
   }, [rows]);
+
   const fabs = useMemo(
     () => ["", ...Array.from(new Set(rows.map((r) => r.fabricant).filter(Boolean))).sort()],
     [rows]
@@ -210,12 +226,13 @@ export default function PageTableauPanneaux() {
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (fProjet && String(r.projet || "") !== fProjet) return false;
+      if (fSectionCour && String(r.sectionCour || "") !== fSectionCour) return false;
       if (fType && String(r.type || "") !== fType) return false;
       if (fEp && String(r.epaisseurPouces || "") !== fEp) return false;
       if (fFab && String(r.fabricant || "") !== fFab) return false;
       return true;
     });
-  }, [rows, fProjet, fType, fEp, fFab]);
+  }, [rows, fProjet, fSectionCour, fType, fEp, fFab]);
 
   const resumeRows = useMemo(() => {
     return RESUME_GROUPS.map((group) => {
@@ -259,7 +276,7 @@ export default function PageTableauPanneaux() {
   }, [resumeRows]);
 
   const cols =
-    "1.1fr .8fr .7fr .55fr .85fr .95fr .55fr .7fr .95fr .95fr .7fr .55fr .85fr .85fr .95fr .95fr .75fr";
+    "1.05fr .7fr .8fr .7fr .55fr .85fr .95fr .55fr .7fr .95fr .95fr .7fr .55fr .85fr .85fr .95fr .95fr .75fr";
 
   const baseCell = {
     overflow: "hidden",
@@ -303,13 +320,27 @@ export default function PageTableauPanneaux() {
           className="bigTitle"
           style={{
             display: "flex",
-            gap: 10,
+            gap: 12,
             justifyContent: "center",
             alignItems: "center",
             flexWrap: "wrap",
           }}
         >
-          Inventaire panneaux
+          <img
+            src={zoneTerrainPanneaux}
+            alt="Zones du terrain"
+            style={{
+              width: 400,
+              height: 300,
+              objectFit: "cover",
+              borderRadius: 10,
+              border: "2px solid #222",
+              background: "#fff",
+              flexShrink: 0,
+            }}
+          />
+
+          <span>Inventaire panneaux</span>
 
           <button
             className="btn"
@@ -348,7 +379,7 @@ export default function PageTableauPanneaux() {
           style={{
             width: "min(1600px, 100%)",
             display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr 1fr",
+            gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
             gap: 10,
           }}
         >
@@ -363,6 +394,22 @@ export default function PageTableauPanneaux() {
               {projets.map((p) => (
                 <option key={p} value={p}>
                   {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>Section dans la cour</div>
+            <select
+              className="selectGray"
+              style={{ width: "100%" }}
+              value={fSectionCour}
+              onChange={(e) => setFSectionCour(e.target.value)}
+            >
+              {sectionsCour.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -591,6 +638,7 @@ export default function PageTableauPanneaux() {
             >
               {[
                 "Projet",
+                "Section cour",
                 "Date",
                 "Type",
                 "Ép.",
@@ -661,6 +709,18 @@ export default function PageTableauPanneaux() {
                     <div style={{ ...baseCell, fontWeight: 800, boxSizing: "border-box" }}>
                       {r.projet || ""}
                     </div>
+
+                    <div
+                      style={{
+                        ...baseCell,
+                        textAlign: "center",
+                        fontWeight: 800,
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      {r.sectionCour || ""}
+                    </div>
+
                     <div style={{ ...baseCell, boxSizing: "border-box" }}>{r.date || ""}</div>
                     <div style={{ ...baseCell, boxSizing: "border-box" }}>{r.type || ""}</div>
                     <div style={{ ...baseCell, textAlign: "center", boxSizing: "border-box" }}>

@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "inventaire-styro"
+    "default": "planification-styro"
   },
   "targets": {
     "planification-styro": {

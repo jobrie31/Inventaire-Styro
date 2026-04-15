@@ -6,6 +6,7 @@ import { db, storage } from "./firebaseConfig";
 import { CLIENT_ID } from "./appClient";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
+import zoneTerrainPanneaux from "./assets/zone-terrain-panneaux.png";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -21,6 +22,7 @@ const CALIBRES = Array.from({ length: (28 - 12) / 2 + 1 }, (_, i) => String(12 +
 const PANNEAUX_TYPES = ["", "Neuf", "Grade B", "Roxul"];
 const PANNEAUX_EPAISSEURS = ["", "3", "4", "5", "6", "7", "8"];
 const PANNEAUX_FABRICANTS = ["", "Norbec", "Melt-Span", "Awip", "Kingspan", "Autre"];
+const PANNEAUX_SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
 
 function isPosNumberStr(x) {
   const s = String(x ?? "").trim();
@@ -46,6 +48,7 @@ export default function PageRetourMateriaux() {
   const [pEpaisseur, setPEpaisseur] = useState("");
   const [pFabricant, setPFabricant] = useState("");
   const [pFabricantAutre, setPFabricantAutre] = useState("");
+  const [pSectionCour, setPSectionCour] = useState("");
   const [pLongPieds, setPLongPieds] = useState("");
   const [pLongPouces, setPLongPouces] = useState("");
   const [pLargeurPouces, setPLargeurPouces] = useState("");
@@ -99,6 +102,7 @@ export default function PageRetourMateriaux() {
     setPEpaisseur("");
     setPFabricant("");
     setPFabricantAutre("");
+    setPSectionCour("");
     setPLongPieds("");
     setPLongPouces("");
     setPLargeurPouces("");
@@ -148,6 +152,7 @@ export default function PageRetourMateriaux() {
       if (!pType) return alert("Choisis un type.");
       if (!pEpaisseur) return alert("Choisis une épaisseur.");
       if (!pFabricant) return alert("Choisis un fabricant.");
+      if (!pSectionCour) return alert("Choisis une section dans la cour.");
 
       const fabricantFinal =
         pFabricant === "Autre" ? String(pFabricantAutre || "").trim() : pFabricant;
@@ -182,6 +187,7 @@ export default function PageRetourMateriaux() {
         type: pType,
         epaisseurPouces: pEpaisseur,
         fabricant: fabricantFinal,
+        sectionCour: pSectionCour,
         longueurPieds: lp,
         longueurPouces: longPoucesNum,
         largeurPouces: largeurNum,
@@ -259,6 +265,7 @@ export default function PageRetourMateriaux() {
           payload.type = a.type;
           payload.epaisseurPouces = a.epaisseurPouces;
           payload.fabricant = a.fabricant;
+          payload.sectionCour = a.sectionCour;
           payload.longueurPieds = a.longueurPieds;
           payload.longueurPouces = a.longueurPouces;
           payload.largeurPouces = a.largeurPouces;
@@ -288,6 +295,7 @@ export default function PageRetourMateriaux() {
       : "Ajout matériaux";
 
   const showDessin = categorie === "Moulures";
+  const showZonePanneaux = categorie === "Panneaux";
 
   return (
     <div className="pageRM pageRM--full">
@@ -300,7 +308,6 @@ export default function PageRetourMateriaux() {
       <div className="mainRow mainRow--full">
         <div className="mainRowInner">
           <div className="leftPanel">
-            {/* ✅ Catégorie au-dessus de la date */}
             <label>Catégorie:</label>
             <select
               className="selectYellow"
@@ -333,6 +340,26 @@ export default function PageRetourMateriaux() {
                 onChange={(e) => setProjet(e.target.value)}
               />
             </div>
+
+            {categorie === "Panneaux" && (
+              <div className="fieldRow" style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, width: 140 }}>
+                  Section dans la cour:
+                </div>
+                <select
+                  className="selectGray"
+                  style={{ width: 180 }}
+                  value={pSectionCour}
+                  onChange={(e) => setPSectionCour(e.target.value)}
+                >
+                  {PANNEAUX_SECTIONS_COUR.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div style={{ height: 18 }} />
 
@@ -526,6 +553,32 @@ export default function PageRetourMateriaux() {
                 penSize={penSize}
               />
             </div>
+          ) : showZonePanneaux ? (
+            <div
+              className="canvasWrap canvasWrap--full"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 8,
+                boxSizing: "border-box",
+              }}
+            >
+              <img
+                src={zoneTerrainPanneaux}
+                alt="Zones du terrain extérieur"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  maxWidth: 620,
+                  maxHeight: 380,
+                  objectFit: "contain",
+                  border: "2px solid #222",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              />
+            </div>
           ) : (
             <div className="canvasWrap canvasWrap--full">
               {!categorie ? <div className="canvasPlaceholder">Choisis une catégorie</div> : <div />}
@@ -695,9 +748,9 @@ export default function PageRetourMateriaux() {
                             const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
                             return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${
                               a.fabricant || ""
-                            } — L:${len} x l:${a.largeurPouces || ""}" — Ext:${
-                              a.faceExterieure || "-"
-                            } / Int:${a.faceInterieure || "-"}`;
+                            } — Section:${a.sectionCour || "-"} — L:${len} x l:${
+                              a.largeurPouces || ""
+                            }" — Ext:${a.faceExterieure || "-"} / Int:${a.faceInterieure || "-"}`;
                           })()}
                     </div>
 

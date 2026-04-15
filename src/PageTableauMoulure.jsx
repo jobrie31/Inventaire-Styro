@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   setDoc,
   deleteDoc,
+  updateDoc,
 } from "firebase/firestore";
 
 export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
@@ -29,6 +30,20 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [reqSaving, setReqSaving] = useState(false);
   const [reqError, setReqError] = useState("");
   const [deletingId, setDeletingId] = useState(null);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editForm, setEditForm] = useState({
+    id: "",
+    projet: "",
+    date: "",
+    categorie: "",
+    materiel: "",
+    calibre: "",
+    quantite: "",
+    dessinUrl: "",
+  });
 
   useEffect(() => {
     const q = query(
@@ -48,11 +63,12 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       if (e.key === "Escape") {
         setModalUrl(null);
         if (reqOpen) closeReq();
+        if (editOpen) closeEdit();
       }
     }
-    if (modalUrl || reqOpen) window.addEventListener("keydown", onKeyDown);
+    if (modalUrl || reqOpen || editOpen) window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalUrl, reqOpen]);
+  }, [modalUrl, reqOpen, editOpen]);
 
   function openReq() {
     setReqOpen(true);
@@ -99,6 +115,107 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       }
       return next;
     });
+  }
+
+  function openEdit(row) {
+    setEditForm({
+      id: row.id || "",
+      projet: row.projet || "",
+      date: row.date || "",
+      categorie: row.categorie || "",
+      materiel: row.materiel || "",
+      calibre: row.calibre || "",
+      quantite: row.quantite ?? "",
+      dessinUrl: row.dessinUrl || "",
+    });
+    setEditError("");
+    setEditSaving(false);
+    setEditOpen(true);
+  }
+
+  function closeEdit() {
+    setEditOpen(false);
+    setEditSaving(false);
+    setEditError("");
+    setEditForm({
+      id: "",
+      projet: "",
+      date: "",
+      categorie: "",
+      materiel: "",
+      calibre: "",
+      quantite: "",
+      dessinUrl: "",
+    });
+  }
+
+  function setEditField(name, value) {
+    setEditForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function confirmerModification() {
+    const id = String(editForm.id || "").trim();
+    const projet = String(editForm.projet || "").trim();
+    const date = String(editForm.date || "").trim();
+    const categorie = String(editForm.categorie || "").trim();
+    const materiel = String(editForm.materiel || "").trim();
+    const calibre = String(editForm.calibre || "").trim();
+    const dessinUrl = String(editForm.dessinUrl || "").trim();
+    const quantiteNum = Number(editForm.quantite);
+
+    if (!id) {
+      setEditError("Document introuvable.");
+      return;
+    }
+    if (!projet) {
+      setEditError("Entre un projet.");
+      return;
+    }
+    if (!date) {
+      setEditError("Entre une date.");
+      return;
+    }
+    if (!categorie) {
+      setEditError("Entre une catégorie.");
+      return;
+    }
+    if (!materiel) {
+      setEditError("Entre un matériel.");
+      return;
+    }
+    if (!calibre) {
+      setEditError("Entre un calibre.");
+      return;
+    }
+    if (!Number.isFinite(quantiteNum) || quantiteNum < 0) {
+      setEditError("Entre une quantité valide.");
+      return;
+    }
+
+    const ok = window.confirm("Confirmer les modifications de cette moulure ?");
+    if (!ok) return;
+
+    setEditSaving(true);
+    setEditError("");
+
+    try {
+      await updateDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id), {
+        projet,
+        date,
+        categorie,
+        materiel,
+        calibre,
+        quantite: quantiteNum,
+        dessinUrl,
+        updatedAt: serverTimestamp(),
+      });
+      closeEdit();
+    } catch (e) {
+      console.error(e);
+      setEditError("Erreur lors de la modification.");
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   async function supprimerMoulure(id) {
@@ -233,7 +350,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         <div className="tableBox tableBox--full">
           <div
             className="tableHeader"
-            style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 80px" }}
+            style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 170px" }}
           >
             <div>Projet</div>
             <div>Date</div>
@@ -260,7 +377,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     onClick={() => setSelectedId(a.id)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 80px",
+                      gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 170px",
                       alignItems: "center",
                       borderBottom: "1px solid #eee",
                       background: selected ? "#dfefff" : "#fff",
@@ -312,7 +429,35 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       )}
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEdit(a);
+                        }}
+                        title="Modifier"
+                        style={{
+                          minWidth: 82,
+                          height: 34,
+                          borderRadius: 10,
+                          border: "1px solid #1e5eff",
+                          background: "#1e5eff",
+                          color: "#fff",
+                          fontWeight: 800,
+                          fontSize: 12,
+                          cursor: "pointer",
+                          padding: "0 10px",
+                        }}
+                      >
+                        Modifier
+                      </button>
+
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -321,23 +466,19 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                         disabled={deletingId === a.id}
                         title="Supprimer"
                         style={{
-                          width: 34,
+                          minWidth: 82,
                           height: 34,
-                          borderRadius: 999,
+                          borderRadius: 10,
                           border: "1px solid #d33",
                           background: deletingId === a.id ? "#ffd6d6" : "#ff5c5c",
                           color: "#fff",
-                          fontWeight: 900,
-                          fontSize: 18,
+                          fontWeight: 800,
+                          fontSize: 12,
                           cursor: deletingId === a.id ? "default" : "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: 0,
-                          lineHeight: 1,
+                          padding: "0 10px",
                         }}
                       >
-                        {deletingId === a.id ? "…" : "✕"}
+                        {deletingId === a.id ? "..." : "Supprimer"}
                       </button>
                     </div>
                   </div>
@@ -404,6 +545,278 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               background: "transparent",
             }}
           />
+        </div>
+      )}
+
+      {editOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 10001,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeEdit();
+          }}
+        >
+          <div
+            style={{
+              width: "min(760px, 95vw)",
+              maxHeight: "88vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+              border: "1px solid rgba(0,0,0,0.08)",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: 16 }}>Modifier la moulure</div>
+
+              <button
+                onClick={closeEdit}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: "1px solid #eee",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 18,
+                  fontWeight: 900,
+                }}
+                title="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: 16 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 14,
+                }}
+              >
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Projet</div>
+                  <input
+                    value={editForm.projet}
+                    onChange={(e) => setEditField("projet", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Date</div>
+                  <input
+                    type="date"
+                    value={editForm.date}
+                    onChange={(e) => setEditField("date", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Catégorie</div>
+                  <input
+                    value={editForm.categorie}
+                    onChange={(e) => setEditField("categorie", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Matériel</div>
+                  <input
+                    value={editForm.materiel}
+                    onChange={(e) => setEditField("materiel", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Calibre</div>
+                  <input
+                    value={editForm.calibre}
+                    onChange={(e) => setEditField("calibre", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Quantité</div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editForm.quantite}
+                    onChange={(e) => setEditField("quantite", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 6, gridColumn: "1 / -1" }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>URL du dessin</div>
+                  <input
+                    value={editForm.dessinUrl}
+                    onChange={(e) => setEditField("dessinUrl", e.target.value)}
+                    placeholder="https://..."
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    gridColumn: "1 / -1",
+                    border: "1px solid #eee",
+                    borderRadius: 12,
+                    padding: 12,
+                    background: "#fafafa",
+                  }}
+                >
+                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>Aperçu du dessin</div>
+
+                  {editForm.dessinUrl ? (
+                    <div style={{ display: "flex", justifyContent: "center" }}>
+                      <img
+                        src={editForm.dessinUrl}
+                        alt="aperçu dessin"
+                        style={{
+                          width: 220,
+                          height: 120,
+                          objectFit: "contain",
+                          border: "1px solid #ddd",
+                          background: "#fff",
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ color: "#777", fontSize: 13 }}>Aucun dessin.</div>
+                  )}
+                </div>
+              </div>
+
+              {editError ? (
+                <div
+                  style={{
+                    marginTop: 14,
+                    border: "1px solid #ffd2d2",
+                    background: "#fff5f5",
+                    color: "#c40000",
+                    padding: 10,
+                    borderRadius: 12,
+                    fontWeight: 800,
+                    fontSize: 13,
+                  }}
+                >
+                  {editError}
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderTop: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <button
+                onClick={closeEdit}
+                disabled={editSaving}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: editSaving ? "default" : "pointer",
+                  fontWeight: 900,
+                  opacity: editSaving ? 0.7 : 1,
+                }}
+              >
+                Annuler
+              </button>
+
+              <button
+                onClick={confirmerModification}
+                disabled={editSaving}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #1e5eff",
+                  background: "#1e5eff",
+                  color: "#fff",
+                  cursor: editSaving ? "default" : "pointer",
+                  fontWeight: 900,
+                  opacity: editSaving ? 0.7 : 1,
+                }}
+              >
+                {editSaving ? "Enregistrement..." : "Confirmer les modifications"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
