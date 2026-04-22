@@ -20,7 +20,7 @@ const CALIBRES = Array.from({ length: (28 - 12) / 2 + 1 }, (_, i) => String(12 +
 
 // ✅ Panneaux
 const PANNEAUX_TYPES = ["", "Neuf", "Grade B", "Roxul"];
-const PANNEAUX_EPAISSEURS = ["", "3", "4", "5", "6", "7", "8"];
+const PANNEAUX_EPAISSEURS = ["", "2", "3", "4", "5", "6", "7", "8"];
 const PANNEAUX_FABRICANTS = ["", "Norbec", "Melt-Span", "Awip", "Kingspan", "Autre"];
 const PANNEAUX_SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
 
@@ -48,6 +48,9 @@ export default function PageRetourMateriaux() {
   const [pEpaisseur, setPEpaisseur] = useState("");
   const [pFabricant, setPFabricant] = useState("");
   const [pFabricantAutre, setPFabricantAutre] = useState("");
+  const [pProfile, setPProfile] = useState("");
+  const [pModele, setPModele] = useState("");
+  const [pFini, setPFini] = useState("");
   const [pSectionCour, setPSectionCour] = useState("");
   const [pLongPieds, setPLongPieds] = useState("");
   const [pLongPouces, setPLongPouces] = useState("");
@@ -102,6 +105,9 @@ export default function PageRetourMateriaux() {
     setPEpaisseur("");
     setPFabricant("");
     setPFabricantAutre("");
+    setPProfile("");
+    setPModele("");
+    setPFini("");
     setPSectionCour("");
     setPLongPieds("");
     setPLongPouces("");
@@ -187,6 +193,9 @@ export default function PageRetourMateriaux() {
         type: pType,
         epaisseurPouces: pEpaisseur,
         fabricant: fabricantFinal,
+        profile: pProfile.trim(),
+        modele: pModele.trim(),
+        fini: pFini.trim(),
         sectionCour: pSectionCour,
         longueurPieds: lp,
         longueurPouces: longPoucesNum,
@@ -265,6 +274,9 @@ export default function PageRetourMateriaux() {
           payload.type = a.type;
           payload.epaisseurPouces = a.epaisseurPouces;
           payload.fabricant = a.fabricant;
+          payload.profile = a.profile || "";
+          payload.modele = a.modele || "";
+          payload.fini = a.fini || "";
           payload.sectionCour = a.sectionCour;
           payload.longueurPieds = a.longueurPieds;
           payload.longueurPouces = a.longueurPouces;
@@ -469,6 +481,36 @@ export default function PageRetourMateriaux() {
                     />
                   </div>
                 )}
+
+                <div className="fieldRow" style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Profile:</div>
+                  <input
+                    className="inputWide"
+                    style={{ width: 200 }}
+                    value={pProfile}
+                    onChange={(e) => setPProfile(e.target.value)}
+                  />
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Modèle:</div>
+                  <input
+                    className="inputWide"
+                    style={{ width: 200 }}
+                    value={pModele}
+                    onChange={(e) => setPModele(e.target.value)}
+                  />
+                </div>
+
+                <div className="fieldRow" style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Fini:</div>
+                  <input
+                    className="inputWide"
+                    style={{ width: 200 }}
+                    value={pFini}
+                    onChange={(e) => setPFini(e.target.value)}
+                  />
+                </div>
 
                 <div className="fieldRow" style={{ marginTop: 20, gap: 8 }}>
                   <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Longueur:</div>
@@ -748,6 +790,8 @@ export default function PageRetourMateriaux() {
                             const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
                             return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${
                               a.fabricant || ""
+                            } — Profile:${a.profile || "-"} — Modèle:${a.modele || "-"} — Fini:${
+                              a.fini || "-"
                             } — Section:${a.sectionCour || "-"} — L:${len} x l:${
                               a.largeurPouces || ""
                             }" — Ext:${a.faceExterieure || "-"} / Int:${a.faceInterieure || "-"}`;

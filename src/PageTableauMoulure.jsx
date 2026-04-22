@@ -14,6 +14,7 @@ import {
   deleteDoc,
   updateDoc,
 } from "firebase/firestore";
+import MouluresExcelButton from "./MouluresExcelButton.jsx";
 
 export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [banque, setBanque] = useState([]);
@@ -320,6 +321,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
             justifyContent: "center",
             gap: 12,
             width: "100%",
+            flexWrap: "wrap",
           }}
         >
           <span>Tableau Moulure</span>
@@ -342,6 +344,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
           >
             + Créer une réquisition
           </button>
+
+          <MouluresExcelButton rows={banque} />
         </div>
         <div />
       </div>

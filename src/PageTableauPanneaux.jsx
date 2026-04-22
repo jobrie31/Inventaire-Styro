@@ -1,4 +1,3 @@
-// src/PageTableauPanneaux.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import { db } from "./firebaseConfig";
@@ -10,9 +9,11 @@ import {
   query,
   doc,
   deleteDoc,
+  updateDoc,
 } from "firebase/firestore";
 import PanneauxRéglages from "./PanneauxRéglages.jsx";
 import zoneTerrainPanneaux from "./assets/zone-terrain-panneaux.png";
+import PanneauxExcelButton from "./PanneauxExcelButton.jsx";
 
 function money(n) {
   if (n === null || n === undefined || n === "") return "";
@@ -141,6 +142,13 @@ function rowMatchesResumeGroup(row, group) {
   return ep === wantedEp;
 }
 
+function isPosNumberStr(x) {
+  const s = String(x ?? "").trim();
+  if (!s) return false;
+  const n = Number(s);
+  return !Number.isNaN(n) && n > 0;
+}
+
 export default function PageTableauPanneaux() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -150,11 +158,18 @@ export default function PageTableauPanneaux() {
   const [fType, setFType] = useState("");
   const [fEp, setFEp] = useState("");
   const [fFab, setFFab] = useState("");
+  const [fProfile, setFProfile] = useState("");
+  const [fModele, setFModele] = useState("");
+  const [fFini, setFFini] = useState("");
 
   const [showSettings, setShowSettings] = useState(false);
   const [showResume, setShowResume] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [deletingId, setDeletingId] = useState(null);
+
+  const [editingId, setEditingId] = useState(null);
+  const [savingEditId, setSavingEditId] = useState(null);
+  const [editRow, setEditRow] = useState(null);
 
   useEffect(() => {
     const q = query(
@@ -223,6 +238,21 @@ export default function PageTableauPanneaux() {
     [rows]
   );
 
+  const profiles = useMemo(
+    () => ["", ...Array.from(new Set(rows.map((r) => r.profile).filter(Boolean))).sort()],
+    [rows]
+  );
+
+  const modeles = useMemo(
+    () => ["", ...Array.from(new Set(rows.map((r) => r.modele).filter(Boolean))).sort()],
+    [rows]
+  );
+
+  const finis = useMemo(
+    () => ["", ...Array.from(new Set(rows.map((r) => r.fini).filter(Boolean))).sort()],
+    [rows]
+  );
+
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (fProjet && String(r.projet || "") !== fProjet) return false;
@@ -230,9 +260,12 @@ export default function PageTableauPanneaux() {
       if (fType && String(r.type || "") !== fType) return false;
       if (fEp && String(r.epaisseurPouces || "") !== fEp) return false;
       if (fFab && String(r.fabricant || "") !== fFab) return false;
+      if (fProfile && String(r.profile || "") !== fProfile) return false;
+      if (fModele && String(r.modele || "") !== fModele) return false;
+      if (fFini && String(r.fini || "") !== fFini) return false;
       return true;
     });
-  }, [rows, fProjet, fSectionCour, fType, fEp, fFab]);
+  }, [rows, fProjet, fSectionCour, fType, fEp, fFab, fProfile, fModele, fFini]);
 
   const resumeRows = useMemo(() => {
     return RESUME_GROUPS.map((group) => {
@@ -276,15 +309,19 @@ export default function PageTableauPanneaux() {
   }, [resumeRows]);
 
   const cols =
-    "1.05fr .7fr .8fr .7fr .55fr .85fr .95fr .55fr .7fr .95fr .95fr .7fr .55fr .85fr .85fr .95fr .95fr .75fr";
+    "1.2fr 0.75fr 0.8fr 0.75fr 0.45fr 0.9fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.5fr 0.75fr 0.75fr 0.8fr 0.55fr 0.75fr 0.75fr 0.75fr 0.75fr 1fr";
 
   const baseCell = {
     overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    textOverflow: "clip",
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+    overflowWrap: "anywhere",
     minWidth: 0,
-    padding: "6px 6px",
+    padding: "5px 4px",
     borderRight: "1px solid #d9d9d9",
+    boxSizing: "border-box",
+    lineHeight: 1.15,
   };
 
   const lastCell = {
@@ -292,7 +329,106 @@ export default function PageTableauPanneaux() {
     borderRight: "none",
   };
 
+  const inputMini = {
+    width: "100%",
+    minWidth: 0,
+    height: 22,
+    fontSize: 10,
+    padding: "0 4px",
+    border: "1px solid #bdbdbd",
+    background: "#fff",
+    boxSizing: "border-box",
+  };
+
   const mult = settings?.multipliers || DEFAULT_SETTINGS.multipliers;
+
+  function startEdit(r) {
+    setEditingId(r.id);
+    setEditRow({
+      projet: r.projet || "",
+      sectionCour: r.sectionCour || "",
+      date: r.date || "",
+      type: r.type || "",
+      epaisseurPouces: r.epaisseurPouces || "",
+      fabricant: r.fabricant || "",
+      profile: r.profile || "",
+      modele: r.modele || "",
+      fini: r.fini || "",
+      longueurPieds: r.longueurPieds ?? "",
+      longueurPouces: r.longueurPouces ?? "",
+      largeurPouces: r.largeurPouces ?? "",
+      quantite: r.quantite ?? "",
+      faceExterieure: r.faceExterieure || "",
+      faceInterieure: r.faceInterieure || "",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditRow(null);
+  }
+
+  function onEditChange(field, value) {
+    setEditRow((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function saveEdit(rowId) {
+    if (!editRow) return;
+
+    const projet = String(editRow.projet || "").trim();
+    if (!projet) return alert("Projet obligatoire.");
+
+    if (!editRow.type) return alert("Type obligatoire.");
+    if (!editRow.epaisseurPouces) return alert("Épaisseur obligatoire.");
+    if (!editRow.fabricant) return alert("Fabricant obligatoire.");
+
+    if (!isPosNumberStr(editRow.longueurPieds)) {
+      return alert("Longueur pieds doit être > 0.");
+    }
+
+    const longPoucesStr = String(editRow.longueurPouces ?? "").trim();
+    const longPoucesNum = longPoucesStr === "" ? 0 : Number(longPoucesStr);
+    if (Number.isNaN(longPoucesNum) || longPoucesNum < 0 || longPoucesNum >= 12) {
+      return alert("Longueur pouces doit être entre 0 et 11.");
+    }
+
+    if (!isPosNumberStr(editRow.largeurPouces)) {
+      return alert("Largeur doit être > 0.");
+    }
+
+    if (!isPosNumberStr(editRow.quantite)) {
+      return alert("Quantité doit être > 0.");
+    }
+
+    setSavingEditId(rowId);
+    try {
+      await updateDoc(doc(db, "clients", CLIENT_ID, "banquePanneaux", rowId), {
+        projet,
+        sectionCour: String(editRow.sectionCour || "").trim(),
+        date: String(editRow.date || "").trim(),
+        type: String(editRow.type || "").trim(),
+        epaisseurPouces: String(editRow.epaisseurPouces || "").trim(),
+        fabricant: String(editRow.fabricant || "").trim(),
+        profile: String(editRow.profile || "").trim(),
+        modele: String(editRow.modele || "").trim(),
+        fini: String(editRow.fini || "").trim(),
+        longueurPieds: Number(editRow.longueurPieds),
+        longueurPouces: longPoucesNum,
+        largeurPouces: Number(editRow.largeurPouces),
+        quantite: Number(editRow.quantite),
+        faceExterieure: String(editRow.faceExterieure || "").trim(),
+        faceInterieure: String(editRow.faceInterieure || "").trim(),
+      });
+
+      setEditingId(null);
+      setEditRow(null);
+    } catch (e) {
+      console.error(e);
+      alert("❌ Modification impossible: " + (e?.message || String(e)));
+    } finally {
+      setSavingEditId(null);
+    }
+  }
 
   async function supprimerRow(rowId) {
     if (!rowId) return;
@@ -350,6 +486,12 @@ export default function PageTableauPanneaux() {
             Réglages
           </button>
 
+          <PanneauxExcelButton
+            rows={filtered}
+            prixUnitaire={prixUnitaire}
+            settings={settings}
+          />
+
           <button
             className="btn"
             style={{
@@ -379,7 +521,7 @@ export default function PageTableauPanneaux() {
           style={{
             width: "min(1600px, 100%)",
             display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
+            gridTemplateColumns: "repeat(8, minmax(0, 1fr))",
             gap: 10,
           }}
         >
@@ -456,6 +598,54 @@ export default function PageTableauPanneaux() {
               onChange={(e) => setFFab(e.target.value)}
             >
               {fabs.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>Profile</div>
+            <select
+              className="selectGray"
+              style={{ width: "100%" }}
+              value={fProfile}
+              onChange={(e) => setFProfile(e.target.value)}
+            >
+              {profiles.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>Modèle</div>
+            <select
+              className="selectGray"
+              style={{ width: "100%" }}
+              value={fModele}
+              onChange={(e) => setFModele(e.target.value)}
+            >
+              {modeles.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4 }}>Fini</div>
+            <select
+              className="selectGray"
+              style={{ width: "100%" }}
+              value={fFini}
+              onChange={(e) => setFFini(e.target.value)}
+            >
+              {finis.map((f) => (
                 <option key={f} value={f}>
                   {f}
                 </option>
@@ -633,7 +823,7 @@ export default function PageTableauPanneaux() {
                 background: "#0b3a78",
                 color: "#fff",
                 borderBottom: "2px solid #0a2f60",
-                fontSize: 12,
+                fontSize: 10,
               }}
             >
               {[
@@ -643,6 +833,9 @@ export default function PageTableauPanneaux() {
                 "Type",
                 "Ép.",
                 "Fabricant",
+                "Profile",
+                "Modèle",
+                "Fini",
                 "Longueur",
                 "Largeur",
                 "Qté",
@@ -663,8 +856,10 @@ export default function PageTableauPanneaux() {
                     fontWeight: 800,
                     display: "flex",
                     alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
                     boxSizing: "border-box",
-                    minHeight: 36,
+                    minHeight: 42,
                   }}
                 >
                   {h}
@@ -678,16 +873,29 @@ export default function PageTableauPanneaux() {
               <div style={{ padding: 12 }}>(Aucune donnée)</div>
             ) : (
               filtered.map((r, i) => {
-                const prix = prixUnitaire(r, settings);
-                const pc = calcPC(r);
+                const isEditing = editingId === r.id;
+
+                const rowForCalc = isEditing
+                  ? {
+                      ...r,
+                      ...editRow,
+                      longueurPieds: Number(editRow?.longueurPieds ?? 0),
+                      longueurPouces: Number(editRow?.longueurPouces ?? 0),
+                      largeurPouces: Number(editRow?.largeurPouces ?? 0),
+                      quantite: Number(editRow?.quantite ?? 0),
+                    }
+                  : r;
+
+                const prix = prixUnitaire(rowForCalc, settings);
+                const pc = calcPC(rowForCalc);
                 const val = calcValeur(pc, prix);
                 const pvMin = divOrNull(prix, mult?.venteMin || 0.9);
                 const psSans = divOrNull(prix, mult?.sugSans || 0.88);
                 const psAvec = divOrNull(prix, mult?.sugAvec || 0.85);
 
                 const longTxt =
-                  r.longueurPieds != null
-                    ? `${r.longueurPieds},${String(r.longueurPouces ?? 0)}`
+                  rowForCalc.longueurPieds != null && rowForCalc.longueurPieds !== ""
+                    ? `${rowForCalc.longueurPieds},${String(rowForCalc.longueurPouces ?? 0)}`
                     : "";
 
                 const rowBg = i % 2 === 1 ? "#f4f4f4" : "#fff";
@@ -698,58 +906,212 @@ export default function PageTableauPanneaux() {
                     style={{
                       display: "grid",
                       gridTemplateColumns: cols,
-                      alignItems: "center",
+                      alignItems: "stretch",
                       width: "100%",
                       boxSizing: "border-box",
                       borderBottom: "1px solid #d9d9d9",
-                      fontSize: 12,
+                      fontSize: 10,
                       background: rowBg,
                     }}
                   >
-                    <div style={{ ...baseCell, fontWeight: 800, boxSizing: "border-box" }}>
-                      {r.projet || ""}
+                    <div style={{ ...baseCell, fontWeight: 800 }}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.projet ?? ""}
+                          onChange={(e) => onEditChange("projet", e.target.value)}
+                        />
+                      ) : (
+                        r.projet || ""
+                      )}
                     </div>
 
-                    <div
-                      style={{
-                        ...baseCell,
-                        textAlign: "center",
-                        fontWeight: 800,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      {r.sectionCour || ""}
+                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {isEditing ? (
+                        <select
+                          style={inputMini}
+                          value={editRow?.sectionCour ?? ""}
+                          onChange={(e) => onEditChange("sectionCour", e.target.value)}
+                        >
+                          {sectionsCour.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        r.sectionCour || ""
+                      )}
                     </div>
 
-                    <div style={{ ...baseCell, boxSizing: "border-box" }}>{r.date || ""}</div>
-                    <div style={{ ...baseCell, boxSizing: "border-box" }}>{r.type || ""}</div>
-                    <div style={{ ...baseCell, textAlign: "center", boxSizing: "border-box" }}>
-                      {r.epaisseurPouces || ""}
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          type="date"
+                          style={inputMini}
+                          value={editRow?.date ?? ""}
+                          onChange={(e) => onEditChange("date", e.target.value)}
+                        />
+                      ) : (
+                        r.date || ""
+                      )}
                     </div>
-                    <div style={{ ...baseCell, boxSizing: "border-box" }}>
-                      {r.fabricant || ""}
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <select
+                          style={inputMini}
+                          value={editRow?.type ?? ""}
+                          onChange={(e) => onEditChange("type", e.target.value)}
+                        >
+                          {types.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        r.type || ""
+                      )}
                     </div>
-                    <div style={{ ...baseCell, textAlign: "center", boxSizing: "border-box" }}>
-                      {longTxt}
+
+                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {isEditing ? (
+                        <select
+                          style={inputMini}
+                          value={editRow?.epaisseurPouces ?? ""}
+                          onChange={(e) => onEditChange("epaisseurPouces", e.target.value)}
+                        >
+                          {eps.map((epp) => (
+                            <option key={epp} value={epp}>
+                              {epp}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        r.epaisseurPouces || ""
+                      )}
                     </div>
-                    <div style={{ ...baseCell, textAlign: "center", boxSizing: "border-box" }}>
-                      {r.largeurPouces || ""}
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.fabricant ?? ""}
+                          onChange={(e) => onEditChange("fabricant", e.target.value)}
+                        />
+                      ) : (
+                        r.fabricant || ""
+                      )}
                     </div>
-                    <div
-                      style={{
-                        ...baseCell,
-                        textAlign: "center",
-                        fontWeight: 800,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      {r.quantite ?? ""}
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.profile ?? ""}
+                          onChange={(e) => onEditChange("profile", e.target.value)}
+                        />
+                      ) : (
+                        r.profile || ""
+                      )}
                     </div>
-                    <div style={{ ...baseCell, boxSizing: "border-box" }}>
-                      {r.faceExterieure || ""}
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.modele ?? ""}
+                          onChange={(e) => onEditChange("modele", e.target.value)}
+                        />
+                      ) : (
+                        r.modele || ""
+                      )}
                     </div>
-                    <div style={{ ...baseCell, boxSizing: "border-box" }}>
-                      {r.faceInterieure || ""}
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.fini ?? ""}
+                          onChange={(e) => onEditChange("fini", e.target.value)}
+                        />
+                      ) : (
+                        r.fini || ""
+                      )}
+                    </div>
+
+                    <div style={{ ...baseCell, display: "flex", gap: 2 }}>
+                      {isEditing ? (
+                        <>
+                          <input
+                            style={inputMini}
+                            value={editRow?.longueurPieds ?? ""}
+                            onChange={(e) => onEditChange("longueurPieds", e.target.value)}
+                            inputMode="numeric"
+                            placeholder="pi"
+                          />
+                          <input
+                            style={inputMini}
+                            value={editRow?.longueurPouces ?? ""}
+                            onChange={(e) => onEditChange("longueurPouces", e.target.value)}
+                            inputMode="numeric"
+                            placeholder="po"
+                          />
+                        </>
+                      ) : (
+                        <div style={{ width: "100%", textAlign: "center" }}>{longTxt}</div>
+                      )}
+                    </div>
+
+                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.largeurPouces ?? ""}
+                          onChange={(e) => onEditChange("largeurPouces", e.target.value)}
+                          inputMode="numeric"
+                        />
+                      ) : (
+                        r.largeurPouces || ""
+                      )}
+                    </div>
+
+                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.quantite ?? ""}
+                          onChange={(e) => onEditChange("quantite", e.target.value)}
+                          inputMode="numeric"
+                        />
+                      ) : (
+                        r.quantite ?? ""
+                      )}
+                    </div>
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.faceExterieure ?? ""}
+                          onChange={(e) => onEditChange("faceExterieure", e.target.value)}
+                        />
+                      ) : (
+                        r.faceExterieure || ""
+                      )}
+                    </div>
+
+                    <div style={baseCell}>
+                      {isEditing ? (
+                        <input
+                          style={inputMini}
+                          value={editRow?.faceInterieure ?? ""}
+                          onChange={(e) => onEditChange("faceInterieure", e.target.value)}
+                        />
+                      ) : (
+                        r.faceInterieure || ""
+                      )}
                     </div>
 
                     <div
@@ -757,44 +1119,160 @@ export default function PageTableauPanneaux() {
                         ...baseCell,
                         textAlign: "right",
                         fontWeight: 800,
-                        boxSizing: "border-box",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
                       }}
                     >
                       {money(prix)}
                     </div>
-                    <div style={{ ...baseCell, textAlign: "right", boxSizing: "border-box" }}>
+
+                    <div
+                      style={{
+                        ...baseCell,
+                        textAlign: "right",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
+                      }}
+                    >
                       {num(pc, 2)}
                     </div>
+
                     <div
                       style={{
                         ...baseCell,
                         textAlign: "right",
                         fontWeight: 800,
-                        boxSizing: "border-box",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
                       }}
                     >
                       {money(val)}
                     </div>
-                    <div style={{ ...baseCell, textAlign: "right", boxSizing: "border-box" }}>
+
+                    <div
+                      style={{
+                        ...baseCell,
+                        textAlign: "right",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
+                      }}
+                    >
                       {money(pvMin)}
                     </div>
-                    <div style={{ ...baseCell, textAlign: "right", boxSizing: "border-box" }}>
+
+                    <div
+                      style={{
+                        ...baseCell,
+                        textAlign: "right",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
+                      }}
+                    >
                       {money(psSans)}
                     </div>
-                    <div style={{ ...baseCell, textAlign: "right", boxSizing: "border-box" }}>
+
+                    <div
+                      style={{
+                        ...baseCell,
+                        textAlign: "right",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
+                      }}
+                    >
                       {money(psAvec)}
                     </div>
 
-                    <div style={{ ...lastCell, textAlign: "center", boxSizing: "border-box" }}>
-                      <button
-                        className="btnRed"
-                        style={{ width: 110, height: 28, fontSize: 12 }}
-                        onClick={() => supprimerRow(r.id)}
-                        disabled={deletingId === r.id}
-                        title="Supprimer"
-                      >
-                        {deletingId === r.id ? "..." : "Supprimer"}
-                      </button>
+                    <div
+                      style={{
+                        ...lastCell,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 4,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {isEditing ? (
+                        <>
+                          <button
+                            className="btn"
+                            style={{
+                              width: 52,
+                              height: 22,
+                              fontSize: 10,
+                              padding: 0,
+                              border: "1px solid #888",
+                              background: "#d9f2d9",
+                            }}
+                            onClick={() => saveEdit(r.id)}
+                            disabled={savingEditId === r.id}
+                            title="Enregistrer"
+                          >
+                            {savingEditId === r.id ? "..." : "OK"}
+                          </button>
+
+                          <button
+                            className="btn"
+                            style={{
+                              width: 52,
+                              height: 22,
+                              fontSize: 10,
+                              padding: 0,
+                              border: "1px solid #888",
+                              background: "#f0f0f0",
+                            }}
+                            onClick={cancelEdit}
+                            title="Annuler"
+                          >
+                            Annuler
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn"
+                            style={{
+                              width: 54,
+                              height: 22,
+                              fontSize: 10,
+                              padding: 0,
+                              border: "1px solid #888",
+                              background: "#e8f0ff",
+                            }}
+                            onClick={() => startEdit(r)}
+                            title="Modifier"
+                          >
+                            Modifier
+                          </button>
+
+                          <button
+                            className="btnRed"
+                            style={{
+                              width: 20,
+                              height: 20,
+                              minWidth: 20,
+                              fontSize: 11,
+                              fontWeight: 800,
+                              padding: 0,
+                              lineHeight: 1,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                            onClick={() => supprimerRow(r.id)}
+                            disabled={deletingId === r.id}
+                            title="Supprimer"
+                          >
+                            {deletingId === r.id ? "…" : "×"}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
