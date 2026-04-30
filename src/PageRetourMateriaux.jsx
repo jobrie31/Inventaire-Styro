@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
 
@@ -18,7 +18,8 @@ function formatDateYYYYMMDD(d) {
 const MATERIELS = ["Blanc Embossé", "Blanc Lisse", "Galvanisé", "Grade B"];
 const CALIBRES = Array.from({ length: (28 - 12) / 2 + 1 }, (_, i) => String(12 + i * 2));
 
-// ✅ Panneaux
+const MOULURES_SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
+
 const PANNEAUX_TYPES = ["", "Neuf", "Grade B", "Roxul"];
 const PANNEAUX_EPAISSEURS = ["", "2", "3", "4", "5", "6", "7", "8"];
 const PANNEAUX_FABRICANTS = ["", "Norbec", "Melt-Span", "Awip", "Kingspan", "Autre"];
@@ -35,13 +36,38 @@ export default function PageRetourMateriaux() {
   const today = useMemo(() => formatDateYYYYMMDD(new Date()), []);
   const [date, setDate] = useState(today);
   const [projet, setProjet] = useState("");
-
-  // ✅ neutre au départ
   const [categorie, setCategorie] = useState("");
+
+  const [viewportW, setViewportW] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1400
+  );
+
+  useEffect(() => {
+    function onResize() {
+      setViewportW(window.innerWidth);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const isIPad = viewportW <= 1180;
+
+  const layout = {
+    leftWidth: isIPad ? 270 : 340,
+    canvasWidth: isIPad ? 470 : 620,
+    canvasHeight: isIPad ? 300 : 380,
+    rightWidth: isIPad ? 130 : 170,
+    gap: isIPad ? 8 : 14,
+    labelFontBig: isIPad ? 15 : 18,
+    labelFont: isIPad ? 13 : 16,
+    inputWide: isIPad ? 160 : 200,
+    selectWidth: isIPad ? 150 : undefined,
+  };
 
   // ---- Moulures ----
   const [materiel, setMateriel] = useState("");
   const [calibre, setCalibre] = useState("");
+  const [mSectionCour, setMSectionCour] = useState("");
 
   // ---- Panneaux ----
   const [pType, setPType] = useState("");
@@ -58,10 +84,8 @@ export default function PageRetourMateriaux() {
   const [pFaceExt, setPFaceExt] = useState("");
   const [pFaceInt, setPFaceInt] = useState("");
 
-  // ---- Commun ----
   const [qteStock, setQteStock] = useState("");
 
-  // ✅ dessin (moulures seulement)
   const [mode, setMode] = useState("line");
   const [clearSignal, setClearSignal] = useState(0);
   const [undoSignal, setUndoSignal] = useState(0);
@@ -72,14 +96,16 @@ export default function PageRetourMateriaux() {
   const [selectedId, setSelectedId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const articleCols = "170px 110px 120px minmax(260px, 1fr) 90px 110px";
+  const articleCols = isIPad
+    ? "130px 95px 105px minmax(210px, 1fr) 75px 90px"
+    : "170px 110px 120px minmax(260px, 1fr) 90px 110px";
 
   const articleBaseCell = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     minWidth: 0,
-    padding: "6px 8px",
+    padding: isIPad ? "5px 6px" : "6px 8px",
     borderRight: "1px solid #e6e6e6",
     boxSizing: "border-box",
   };
@@ -93,14 +119,13 @@ export default function PageRetourMateriaux() {
     setQteStock("");
     setSelectedId(null);
 
-    // moulures
     setMateriel("");
     setCalibre("");
+    setMSectionCour("");
     setDernierDessinPng(null);
     setMode("line");
     setClearSignal((n) => n + 1);
 
-    // panneaux
     setPType("");
     setPEpaisseur("");
     setPFabricant("");
@@ -122,9 +147,7 @@ export default function PageRetourMateriaux() {
   }
 
   function ajouterArticle() {
-    if (!categorie) {
-      return alert("Choisis une catégorie pour commencer.");
-    }
+    if (!categorie) return alert("Choisis une catégorie pour commencer.");
 
     const p = projet.trim();
     if (!p) return alert("Entre un projet.");
@@ -137,6 +160,7 @@ export default function PageRetourMateriaux() {
     if (categorie === "Moulures") {
       if (!materiel) return alert("Choisis un matériel.");
       if (!calibre) return alert("Choisis un calibre.");
+      if (!mSectionCour) return alert("Choisis une section de cour.");
 
       const newItem = {
         id,
@@ -147,6 +171,7 @@ export default function PageRetourMateriaux() {
         dessinPng: dernierDessinPng || null,
         materiel,
         calibre,
+        sectionCour: mSectionCour,
       };
 
       setArticles((prev) => [newItem, ...prev]);
@@ -167,13 +192,12 @@ export default function PageRetourMateriaux() {
         return alert("Entre le fabricant (Autre).");
       }
 
-      if (!isPosNumberStr(pLongPieds)) {
-        return alert("Entre une longueur (pieds) valide (> 0).");
-      }
+      if (!isPosNumberStr(pLongPieds)) return alert("Entre une longueur (pieds) valide (> 0).");
       const lp = Number(String(pLongPieds).trim());
 
       const longPoucesStr = String(pLongPouces ?? "").trim();
       const longPoucesNum = longPoucesStr === "" ? 0 : Number(longPoucesStr);
+
       if (Number.isNaN(longPoucesNum) || longPoucesNum < 0 || longPoucesNum >= 12) {
         return alert("Longueur (pouces) doit être entre 0 et 11.");
       }
@@ -181,6 +205,7 @@ export default function PageRetourMateriaux() {
       if (!isPosNumberStr(pLargeurPouces)) {
         return alert("Entre une largeur (pouces) valide (> 0).");
       }
+
       const largeurNum = Number(String(pLargeurPouces).trim());
 
       const newItem = {
@@ -229,6 +254,7 @@ export default function PageRetourMateriaux() {
     if (!articles.length) return alert("Rien à enregistrer.");
 
     setIsSaving(true);
+
     try {
       for (const a of articles) {
         let dessinUrl = null;
@@ -238,7 +264,6 @@ export default function PageRetourMateriaux() {
         const storageFolder = isPanneaux ? "banquePanneaux" : "banqueMoulures";
         const firestoreCollection = isPanneaux ? "banquePanneaux" : "banqueMoulures";
 
-        // ✅ upload dessin seulement moulures
         if (!isPanneaux && a.dessinPng) {
           const isWebp = a.dessinPng.startsWith("data:image/webp");
           const ext = isWebp ? "webp" : "jpg";
@@ -268,6 +293,7 @@ export default function PageRetourMateriaux() {
         if (a.categorie === "Moulures") {
           payload.materiel = a.materiel;
           payload.calibre = a.calibre;
+          payload.sectionCour = a.sectionCour;
         }
 
         if (a.categorie === "Panneaux") {
@@ -310,21 +336,57 @@ export default function PageRetourMateriaux() {
   const showZonePanneaux = categorie === "Panneaux";
 
   return (
-    <div className="pageRM pageRM--full">
-      <div className="titleRow titleRow--full" style={{ paddingTop: 12 }}>
+    <div
+      className="pageRM pageRM--full"
+      style={{
+        overflowX: "hidden",
+        maxWidth: "100vw",
+      }}
+    >
+      <div className="titleRow titleRow--full" style={{ paddingTop: 8 }}>
         <div />
-        <div className="bigTitle">{title}</div>
+        <div className="bigTitle" style={{ fontSize: isIPad ? 30 : undefined }}>
+          {title}
+        </div>
         <div />
       </div>
 
-      <div className="mainRow mainRow--full">
-        <div className="mainRowInner">
-          <div className="leftPanel">
+      <div
+        className="mainRow mainRow--full"
+        style={{
+          overflowX: "hidden",
+          width: "100%",
+        }}
+      >
+        <div
+          className="mainRowInner"
+          style={{
+            width: "100%",
+            maxWidth: "100vw",
+            boxSizing: "border-box",
+            display: "grid",
+            gridTemplateColumns: `${layout.leftWidth}px ${layout.canvasWidth}px ${layout.rightWidth}px`,
+            gap: layout.gap,
+            alignItems: "start",
+            justifyContent: "center",
+            padding: isIPad ? "0 6px" : undefined,
+            overflowX: "hidden",
+          }}
+        >
+          <div
+            className="leftPanel"
+            style={{
+              width: layout.leftWidth,
+              minWidth: 0,
+              boxSizing: "border-box",
+            }}
+          >
             <label>Catégorie:</label>
             <select
               className="selectYellow"
               value={categorie}
               onChange={(e) => onChangeCategorie(e.target.value)}
+              style={{ maxWidth: "100%" }}
             >
               <option value="">Choisir une catégorie</option>
               <option value="Moulures">Moulures</option>
@@ -333,8 +395,8 @@ export default function PageRetourMateriaux() {
               <option value="Autre">Autre</option>
             </select>
 
-            <div className="fieldRow" style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, width: 90 }}>Date:</div>
+            <div className="fieldRow" style={{ marginTop: isIPad ? 10 : 16 }}>
+              <div style={{ fontSize: layout.labelFontBig, fontWeight: 700, width: 75 }}>Date:</div>
               <input
                 className="inputSmall"
                 style={{ width: 125 }}
@@ -344,23 +406,26 @@ export default function PageRetourMateriaux() {
               />
             </div>
 
-            <div className="fieldRow" style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, width: 90 }}>Projet:</div>
+            <div className="fieldRow" style={{ marginTop: isIPad ? 10 : 14 }}>
+              <div style={{ fontSize: layout.labelFontBig, fontWeight: 700, width: 75 }}>
+                Projet:
+              </div>
               <input
                 className="inputWide"
+                style={{ width: layout.inputWide }}
                 value={projet}
                 onChange={(e) => setProjet(e.target.value)}
               />
             </div>
 
             {categorie === "Panneaux" && (
-              <div className="fieldRow" style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, width: 140 }}>
+              <div className="fieldRow" style={{ marginTop: 10 }}>
+                <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 110 }}>
                   Section dans la cour:
                 </div>
                 <select
                   className="selectGray"
-                  style={{ width: 180 }}
+                  style={{ width: 140 }}
                   value={pSectionCour}
                   onChange={(e) => setPSectionCour(e.target.value)}
                 >
@@ -373,22 +438,21 @@ export default function PageRetourMateriaux() {
               </div>
             )}
 
-            <div style={{ height: 18 }} />
+            <div style={{ height: isIPad ? 8 : 18 }} />
 
-            {!categorie && (
-              <div className="neutralBox">
-                Choisis une catégorie pour commencer.
-              </div>
-            )}
+            {!categorie && <div className="neutralBox">Choisis une catégorie pour commencer.</div>}
 
             {categorie === "Moulures" && (
               <>
                 <div className="fieldRow" style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Matériel:</div>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 88 }}>
+                    Matériel:
+                  </div>
                   <select
                     className="selectGray"
                     value={materiel}
                     onChange={(e) => setMateriel(e.target.value)}
+                    style={{ width: layout.selectWidth }}
                   >
                     <option value=""></option>
                     {MATERIELS.map((m) => (
@@ -399,12 +463,15 @@ export default function PageRetourMateriaux() {
                   </select>
                 </div>
 
-                <div className="fieldRow" style={{ marginTop: 24 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Calibre:</div>
+                <div className="fieldRow" style={{ marginTop: isIPad ? 14 : 24 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 88 }}>
+                    Calibre:
+                  </div>
                   <select
                     className="selectGray"
                     value={calibre}
                     onChange={(e) => setCalibre(e.target.value)}
+                    style={{ width: layout.selectWidth }}
                   >
                     <option value=""></option>
                     {CALIBRES.map((c) => (
@@ -414,17 +481,38 @@ export default function PageRetourMateriaux() {
                     ))}
                   </select>
                 </div>
+
+                <div className="fieldRow" style={{ marginTop: isIPad ? 14 : 24 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 110 }}>
+                    Section de cour:
+                  </div>
+                  <select
+                    className="selectGray"
+                    value={mSectionCour}
+                    onChange={(e) => setMSectionCour(e.target.value)}
+                    style={{ width: isIPad ? 90 : undefined }}
+                  >
+                    {MOULURES_SECTIONS_COUR.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </>
             )}
 
             {categorie === "Panneaux" && (
               <>
-                <div className="fieldRow" style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Type:</div>
+                <div className="fieldRow" style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 75 }}>
+                    Type:
+                  </div>
                   <select
                     className="selectGray"
                     value={pType}
                     onChange={(e) => setPType(e.target.value)}
+                    style={{ width: layout.selectWidth }}
                   >
                     {PANNEAUX_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -434,12 +522,15 @@ export default function PageRetourMateriaux() {
                   </select>
                 </div>
 
-                <div className="fieldRow" style={{ marginTop: 18 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Épaisseur:</div>
+                <div className="fieldRow" style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 75 }}>
+                    Épaisseur:
+                  </div>
                   <select
                     className="selectGray"
                     value={pEpaisseur}
                     onChange={(e) => setPEpaisseur(e.target.value)}
+                    style={{ width: 80 }}
                   >
                     {PANNEAUX_EPAISSEURS.map((ep) => (
                       <option key={ep} value={ep}>
@@ -447,11 +538,13 @@ export default function PageRetourMateriaux() {
                       </option>
                     ))}
                   </select>
-                  <div style={{ fontWeight: 700 }}>Pouces</div>
+                  <div style={{ fontWeight: 700, fontSize: isIPad ? 12 : undefined }}>Pouces</div>
                 </div>
 
-                <div className="fieldRow" style={{ marginTop: 18, alignItems: "center" }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Fabricant:</div>
+                <div className="fieldRow" style={{ marginTop: 12, alignItems: "center" }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 75 }}>
+                    Fabricant:
+                  </div>
                   <select
                     className="selectGray"
                     value={pFabricant}
@@ -460,6 +553,7 @@ export default function PageRetourMateriaux() {
                       setPFabricant(v);
                       if (v !== "Autre") setPFabricantAutre("");
                     }}
+                    style={{ width: layout.selectWidth }}
                   >
                     {PANNEAUX_FABRICANTS.map((f) => (
                       <option key={f} value={f}>
@@ -470,11 +564,11 @@ export default function PageRetourMateriaux() {
                 </div>
 
                 {pFabricant === "Autre" && (
-                  <div className="fieldRow" style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}></div>
+                  <div className="fieldRow" style={{ marginTop: 8 }}>
+                    <div style={{ width: 75 }}></div>
                     <input
                       className="inputWide"
-                      style={{ width: 200 }}
+                      style={{ width: layout.inputWide }}
                       placeholder="Écrire fabricant..."
                       value={pFabricantAutre}
                       onChange={(e) => setPFabricantAutre(e.target.value)}
@@ -482,87 +576,79 @@ export default function PageRetourMateriaux() {
                   </div>
                 )}
 
-                <div className="fieldRow" style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Profile:</div>
-                  <input
-                    className="inputWide"
-                    style={{ width: 200 }}
-                    value={pProfile}
-                    onChange={(e) => setPProfile(e.target.value)}
-                  />
-                </div>
+                {[
+                  ["Profile:", pProfile, setPProfile],
+                  ["Modèle:", pModele, setPModele],
+                  ["Fini:", pFini, setPFini],
+                ].map(([label, value, setter]) => (
+                  <div className="fieldRow" style={{ marginTop: 8 }} key={label}>
+                    <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 75 }}>
+                      {label}
+                    </div>
+                    <input
+                      className="inputWide"
+                      style={{ width: layout.inputWide }}
+                      value={value}
+                      onChange={(e) => setter(e.target.value)}
+                    />
+                  </div>
+                ))}
 
-                <div className="fieldRow" style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Modèle:</div>
-                  <input
-                    className="inputWide"
-                    style={{ width: 200 }}
-                    value={pModele}
-                    onChange={(e) => setPModele(e.target.value)}
-                  />
-                </div>
-
-                <div className="fieldRow" style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Fini:</div>
-                  <input
-                    className="inputWide"
-                    style={{ width: 200 }}
-                    value={pFini}
-                    onChange={(e) => setPFini(e.target.value)}
-                  />
-                </div>
-
-                <div className="fieldRow" style={{ marginTop: 20, gap: 8 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Longueur:</div>
+                <div className="fieldRow" style={{ marginTop: 12, gap: 6 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 75 }}>
+                    Longueur:
+                  </div>
                   <input
                     className="inputSmall"
-                    style={{ width: 70 }}
+                    style={{ width: 55 }}
                     value={pLongPieds}
                     onChange={(e) => setPLongPieds(e.target.value)}
                     inputMode="numeric"
                   />
-                  <div style={{ fontWeight: 700 }}>Pieds</div>
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Pi</div>
                   <input
                     className="inputSmall"
-                    style={{ width: 70 }}
+                    style={{ width: 55 }}
                     value={pLongPouces}
                     onChange={(e) => setPLongPouces(e.target.value)}
                     inputMode="numeric"
                   />
-                  <div style={{ fontWeight: 700 }}>Pouces</div>
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Po</div>
                 </div>
 
-                <div className="fieldRow" style={{ marginTop: 18 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 90 }}>Largeur:</div>
+                <div className="fieldRow" style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 75 }}>
+                    Largeur:
+                  </div>
                   <input
                     className="inputSmall"
-                    style={{ width: 110 }}
+                    style={{ width: 90 }}
                     value={pLargeurPouces}
                     onChange={(e) => setPLargeurPouces(e.target.value)}
                     inputMode="numeric"
                   />
-                  <div style={{ fontWeight: 700 }}>Pouces</div>
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>Pouces</div>
                 </div>
 
-                <div className="fieldRow" style={{ marginTop: 18 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>
+                <div className="fieldRow" style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 110 }}>
                     Face extérieure:
                   </div>
                   <input
                     className="inputWide"
-                    style={{ width: 180 }}
+                    style={{ width: 145 }}
                     value={pFaceExt}
                     onChange={(e) => setPFaceExt(e.target.value)}
                   />
                 </div>
 
-                <div className="fieldRow" style={{ marginTop: 16 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>
+                <div className="fieldRow" style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 110 }}>
                     Face intérieure:
                   </div>
                   <input
                     className="inputWide"
-                    style={{ width: 180 }}
+                    style={{ width: 145 }}
                     value={pFaceInt}
                     onChange={(e) => setPFaceInt(e.target.value)}
                   />
@@ -571,10 +657,13 @@ export default function PageRetourMateriaux() {
             )}
 
             {!!categorie && (
-              <div className="fieldRow" style={{ marginTop: 28 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, width: 140 }}>Quantité en stock:</div>
+              <div className="fieldRow" style={{ marginTop: isIPad ? 16 : 28 }}>
+                <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 120 }}>
+                  Quantité en stock:
+                </div>
                 <input
                   className="inputSmall"
+                  style={{ width: 85 }}
                   value={qteStock}
                   onChange={(e) => setQteStock(e.target.value)}
                   inputMode="numeric"
@@ -584,13 +673,21 @@ export default function PageRetourMateriaux() {
           </div>
 
           {showDessin ? (
-            <div className="canvasWrap canvasWrap--full">
+            <div
+              className="canvasWrap canvasWrap--full"
+              style={{
+                width: layout.canvasWidth,
+                height: layout.canvasHeight,
+                minWidth: 0,
+                boxSizing: "border-box",
+              }}
+            >
               <DessinCanvas
                 mode={mode}
                 clearSignal={clearSignal}
                 undoSignal={undoSignal}
-                width={620}
-                height={380}
+                width={layout.canvasWidth}
+                height={layout.canvasHeight}
                 onExportPNG={(dataUrl) => setDernierDessinPng(dataUrl)}
                 penSize={penSize}
               />
@@ -599,6 +696,8 @@ export default function PageRetourMateriaux() {
             <div
               className="canvasWrap canvasWrap--full"
               style={{
+                width: layout.canvasWidth,
+                height: layout.canvasHeight,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -612,8 +711,6 @@ export default function PageRetourMateriaux() {
                 style={{
                   width: "100%",
                   height: "100%",
-                  maxWidth: 620,
-                  maxHeight: 380,
                   objectFit: "contain",
                   border: "2px solid #222",
                   borderRadius: 8,
@@ -622,70 +719,74 @@ export default function PageRetourMateriaux() {
               />
             </div>
           ) : (
-            <div className="canvasWrap canvasWrap--full">
+            <div
+              className="canvasWrap canvasWrap--full"
+              style={{
+                width: layout.canvasWidth,
+                height: layout.canvasHeight,
+                minWidth: 0,
+              }}
+            >
               {!categorie ? <div className="canvasPlaceholder">Choisis une catégorie</div> : <div />}
             </div>
           )}
 
           {showDessin ? (
-            <div className="rightPanel">
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <button
-                  className="btn"
-                  onClick={() => setMode("line")}
-                  style={{
-                    width: "100%",
-                    border: "1px solid #ddd",
-                    background: mode === "line" ? "#e8f0ff" : "#fff",
-                    fontWeight: mode === "line" ? 800 : 700,
-                  }}
-                >
-                  📏 Ligne droite
-                </button>
+            <div
+              className="rightPanel"
+              style={{
+                width: layout.rightWidth,
+                minWidth: 0,
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: isIPad ? 6 : 8 }}>
+                {[
+                  ["line", "📏 Ligne droite"],
+                  ["free", "✏️ Dessin libre"],
+                  ["text", "📝 Ajouter texte"],
+                ].map(([m, label]) => (
+                  <button
+                    key={m}
+                    className="btn"
+                    onClick={() => setMode(m)}
+                    style={{
+                      width: "100%",
+                      border: "1px solid #ddd",
+                      background: mode === m ? "#e8f0ff" : "#fff",
+                      fontWeight: mode === m ? 800 : 700,
+                      fontSize: isIPad ? 12 : undefined,
+                      padding: isIPad ? "6px 4px" : undefined,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
 
                 <button
                   className="btn"
-                  onClick={() => setMode("free")}
-                  style={{
-                    width: "100%",
-                    border: "1px solid #ddd",
-                    background: mode === "free" ? "#e8f0ff" : "#fff",
-                    fontWeight: mode === "free" ? 800 : 700,
-                  }}
+                  onClick={() => setUndoSignal((n) => n + 1)}
+                  style={{ fontSize: isIPad ? 12 : undefined, padding: isIPad ? "6px 4px" : undefined }}
                 >
-                  ✏️ Dessin libre
-                </button>
-
-                <button
-                  className="btn"
-                  onClick={() => setMode("text")}
-                  style={{
-                    width: "100%",
-                    border: "1px solid #ddd",
-                    background: mode === "text" ? "#e8f0ff" : "#fff",
-                    fontWeight: mode === "text" ? 800 : 700,
-                  }}
-                >
-                  📝 Ajouter texte
-                </button>
-
-                <button className="btn" onClick={() => setUndoSignal((n) => n + 1)}>
                   ↩ Retour
                 </button>
 
-                <button className="btn" onClick={() => setClearSignal((n) => n + 1)}>
+                <button
+                  className="btn"
+                  onClick={() => setClearSignal((n) => n + 1)}
+                  style={{ fontSize: isIPad ? 12 : undefined, padding: isIPad ? "6px 4px" : undefined }}
+                >
                   🗑️ Effacer dessin
                 </button>
               </div>
             </div>
           ) : (
-            <div className="rightPanel" />
+            <div className="rightPanel" style={{ width: layout.rightWidth, minWidth: 0 }} />
           )}
         </div>
       </div>
 
-      <div className="bottomRow bottomRow--full">
-        <div className="bottomRowInner">
+      <div className="bottomRow bottomRow--full" style={{ overflowX: "hidden" }}>
+        <div className="bottomRowInner" style={{ maxWidth: "100vw", boxSizing: "border-box" }}>
           <div className="bottomLeftBtns">
             <button className="btnGreen" onClick={ajouterArticle}>
               Ajouter article
@@ -703,12 +804,13 @@ export default function PageRetourMateriaux() {
         </div>
       </div>
 
-      <div className="tableZone tableZone--center">
+      <div className="tableZone tableZone--center" style={{ overflowX: "hidden" }}>
         <div
           className="tableBox tableBox--wide"
           style={{
-            height: 220,
+            height: isIPad ? 190 : 220,
             overflow: "hidden",
+            maxWidth: "calc(100vw - 16px)",
           }}
         >
           <div
@@ -731,7 +833,7 @@ export default function PageRetourMateriaux() {
                 alignItems: "stretch",
                 width: "100%",
                 boxSizing: "border-box",
-                fontSize: 13,
+                fontSize: isIPad ? 12 : 13,
                 fontWeight: 700,
                 borderBottom: "1px solid #e0e0e0",
                 background: "#fff",
@@ -745,7 +847,7 @@ export default function PageRetourMateriaux() {
                       ...(idx === arr.length - 1 ? articleLastCell : articleBaseCell),
                       display: "flex",
                       alignItems: "center",
-                      minHeight: 40,
+                      minHeight: 36,
                     }}
                   >
                     {h}
@@ -776,7 +878,7 @@ export default function PageRetourMateriaux() {
                       borderBottom: "1px solid #eee",
                       background: rowBg,
                       cursor: "pointer",
-                      fontSize: 13,
+                      fontSize: isIPad ? 12 : 13,
                     }}
                   >
                     <div style={{ ...articleBaseCell, fontWeight: 700 }}>{a.projet}</div>
@@ -785,7 +887,9 @@ export default function PageRetourMateriaux() {
 
                     <div style={articleBaseCell}>
                       {a.categorie === "Moulures"
-                        ? `${a.materiel || ""} — Calibre ${a.calibre || ""}`
+                        ? `${a.materiel || ""} — Calibre ${a.calibre || ""} — Section:${
+                            a.sectionCour || "-"
+                          }`
                         : (() => {
                             const len = `${a.longueurPieds ?? ""}' ${a.longueurPouces ?? 0}"`;
                             return `${a.type || ""} — ${a.epaisseurPouces || ""}" — ${
@@ -817,8 +921,8 @@ export default function PageRetourMateriaux() {
                           loading="lazy"
                           decoding="async"
                           style={{
-                            width: 96,
-                            height: 44,
+                            width: isIPad ? 74 : 96,
+                            height: isIPad ? 36 : 44,
                             objectFit: "contain",
                             border: "1px solid #ddd",
                             background: "#fff",

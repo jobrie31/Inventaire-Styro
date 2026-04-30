@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
-import { db } from "./firebaseConfig";
+import DessinCanvas from "./DessinCanvas";
+import { db, storage } from "./firebaseConfig";
 import { CLIENT_ID } from "./appClient";
 import {
   collection,
@@ -14,12 +15,14 @@ import {
   deleteDoc,
   updateDoc,
 } from "firebase/firestore";
+import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import MouluresExcelButton from "./MouluresExcelButton.jsx";
+
+const SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
 
 export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [banque, setBanque] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-
   const [modalUrl, setModalUrl] = useState(null);
 
   const [reqOpen, setReqOpen] = useState(false);
@@ -42,20 +45,30 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     categorie: "",
     materiel: "",
     calibre: "",
+    sectionCour: "",
     quantite: "",
     dessinUrl: "",
+    dessinPath: "",
   });
+
+  const [drawEditOpen, setDrawEditOpen] = useState(false);
+  const [drawMode, setDrawMode] = useState("line");
+  const [drawClearSignal, setDrawClearSignal] = useState(0);
+  const [drawUndoSignal, setDrawUndoSignal] = useState(0);
+  const [editNewDessinPng, setEditNewDessinPng] = useState(null);
 
   useEffect(() => {
     const q = query(
       collection(db, "clients", CLIENT_ID, "banqueMoulures"),
       orderBy("createdAt", "desc")
     );
+
     const unsub = onSnapshot(
       q,
       (snap) => setBanque(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
       (err) => console.error(err)
     );
+
     return () => unsub();
   }, []);
 
@@ -63,13 +76,18 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     function onKeyDown(e) {
       if (e.key === "Escape") {
         setModalUrl(null);
+        if (drawEditOpen) closeDrawEdit();
         if (reqOpen) closeReq();
         if (editOpen) closeEdit();
       }
     }
-    if (modalUrl || reqOpen || editOpen) window.addEventListener("keydown", onKeyDown);
+
+    if (modalUrl || reqOpen || editOpen || drawEditOpen) {
+      window.addEventListener("keydown", onKeyDown);
+    }
+
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalUrl, reqOpen, editOpen]);
+  }, [modalUrl, reqOpen, editOpen, drawEditOpen]);
 
   function openReq() {
     setReqOpen(true);
@@ -126,9 +144,17 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       categorie: row.categorie || "",
       materiel: row.materiel || "",
       calibre: row.calibre || "",
+      sectionCour: row.sectionCour || "",
       quantite: row.quantite ?? "",
       dessinUrl: row.dessinUrl || "",
+      dessinPath: row.dessinPath || "",
     });
+
+    setEditNewDessinPng(null);
+    setDrawMode("line");
+    setDrawClearSignal((n) => n + 1);
+    setDrawUndoSignal(0);
+
     setEditError("");
     setEditSaving(false);
     setEditOpen(true);
@@ -138,6 +164,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     setEditOpen(false);
     setEditSaving(false);
     setEditError("");
+    setEditNewDessinPng(null);
+    setDrawEditOpen(false);
     setEditForm({
       id: "",
       projet: "",
@@ -145,13 +173,60 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       categorie: "",
       materiel: "",
       calibre: "",
+      sectionCour: "",
       quantite: "",
       dessinUrl: "",
+      dessinPath: "",
     });
+  }
+
+  function openDrawEdit() {
+    setDrawMode("line");
+    setDrawClearSignal((n) => n + 1);
+    setDrawUndoSignal(0);
+    setEditNewDessinPng(null);
+    setDrawEditOpen(true);
+  }
+
+  function closeDrawEdit() {
+    setDrawEditOpen(false);
+  }
+
+  function confirmerNouveauDessin() {
+    if (!editNewDessinPng) {
+      alert("Fais un dessin avant de confirmer.");
+      return;
+    }
+    setDrawEditOpen(false);
   }
 
   function setEditField(name, value) {
     setEditForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function uploadNewDessinIfNeeded(id) {
+    if (!editNewDessinPng) {
+      return {
+        dessinUrl: String(editForm.dessinUrl || "").trim(),
+        dessinPath: String(editForm.dessinPath || "").trim(),
+      };
+    }
+
+    const isWebp = editNewDessinPng.startsWith("data:image/webp");
+    const ext = isWebp ? "webp" : "jpg";
+    const contentType = isWebp ? "image/webp" : "image/jpeg";
+
+    const dessinPath = `clients/${CLIENT_ID}/banqueMoulures/${id}-edit-${Date.now()}.${ext}`;
+    const storageRef = ref(storage, dessinPath);
+
+    await uploadString(storageRef, editNewDessinPng, "data_url", {
+      contentType,
+      cacheControl: "public,max-age=31536000,immutable",
+    });
+
+    const dessinUrl = await getDownloadURL(storageRef);
+
+    return { dessinUrl, dessinPath };
   }
 
   async function confirmerModification() {
@@ -161,36 +236,18 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     const categorie = String(editForm.categorie || "").trim();
     const materiel = String(editForm.materiel || "").trim();
     const calibre = String(editForm.calibre || "").trim();
-    const dessinUrl = String(editForm.dessinUrl || "").trim();
+    const sectionCour = String(editForm.sectionCour || "").trim();
     const quantiteNum = Number(editForm.quantite);
 
-    if (!id) {
-      setEditError("Document introuvable.");
-      return;
-    }
-    if (!projet) {
-      setEditError("Entre un projet.");
-      return;
-    }
-    if (!date) {
-      setEditError("Entre une date.");
-      return;
-    }
-    if (!categorie) {
-      setEditError("Entre une catégorie.");
-      return;
-    }
-    if (!materiel) {
-      setEditError("Entre un matériel.");
-      return;
-    }
-    if (!calibre) {
-      setEditError("Entre un calibre.");
-      return;
-    }
+    if (!id) return setEditError("Document introuvable.");
+    if (!projet) return setEditError("Entre un projet.");
+    if (!date) return setEditError("Entre une date.");
+    if (!categorie) return setEditError("Entre une catégorie.");
+    if (!materiel) return setEditError("Entre un matériel.");
+    if (!calibre) return setEditError("Entre un calibre.");
+    if (!sectionCour) return setEditError("Choisis une section de cour.");
     if (!Number.isFinite(quantiteNum) || quantiteNum < 0) {
-      setEditError("Entre une quantité valide.");
-      return;
+      return setEditError("Entre une quantité valide.");
     }
 
     const ok = window.confirm("Confirmer les modifications de cette moulure ?");
@@ -200,16 +257,21 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     setEditError("");
 
     try {
+      const { dessinUrl, dessinPath } = await uploadNewDessinIfNeeded(id);
+
       await updateDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id), {
         projet,
         date,
         categorie,
         materiel,
         calibre,
+        sectionCour,
         quantite: quantiteNum,
         dessinUrl,
+        dessinPath,
         updatedAt: serverTimestamp(),
       });
+
       closeEdit();
     } catch (e) {
       console.error(e);
@@ -239,16 +301,19 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
   async function createReq() {
     setReqError("");
+
     if (reqSelected.size === 0) {
       setReqError("Sélectionne au moins 1 moulure.");
       return;
     }
+
     if (!String(reqProjetEnvoye || "").trim()) {
       setReqError("Entre le projet à envoyer.");
       return;
     }
 
     setReqSaving(true);
+
     try {
       const counterRef = doc(db, "clients", CLIENT_ID, "_counters", "reqMoulures");
 
@@ -269,11 +334,14 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         categorie: it.categorie || "",
         materiel: it.materiel || "",
         calibre: it.calibre || "",
+        sectionCour: it.sectionCour || "",
         dessinUrl: it.dessinUrl || "",
+        dessinPath: it.dessinPath || "",
         quantiteDemande: Number(reqQtyById[it.id] ?? 1) || 1,
       }));
 
       const reqRef = doc(db, "clients", CLIENT_ID, "requisitionsMoulures", reqId);
+
       await setDoc(reqRef, {
         reqId,
         reqNum,
@@ -300,6 +368,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       setReqSaving(false);
     }
   }
+
+  const gridCols = "170px 130px 120px 140px 170px 110px 110px 160px 190px";
 
   return (
     <div className="pageRM pageRM--full">
@@ -350,13 +420,24 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         <div />
       </div>
 
-      <div className="tableZone tableZone--center">
-        <div className="tableBox tableBox--full">
-          <div
-            className="tableHeader"
-            style={{ gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 170px" }}
-          >
+      <div
+        className="tableZone tableZone--center"
+        style={{
+          width: "100%",
+          maxWidth: "100vw",
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        <div
+          className="tableBox tableBox--full"
+          style={{
+            minWidth: 1250,
+          }}
+        >
+          <div className="tableHeader" style={{ gridTemplateColumns: gridCols }}>
             <div>Projet</div>
+            <div>Section cour</div>
             <div>Date</div>
             <div>Catégorie</div>
             <div>Matériel</div>
@@ -381,13 +462,14 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     onClick={() => setSelectedId(a.id)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "180px 120px 140px 160px 110px 110px 170px 170px",
+                      gridTemplateColumns: gridCols,
                       alignItems: "center",
                       borderBottom: "1px solid #eee",
                       background: selected ? "#dfefff" : "#fff",
                       cursor: "pointer",
                       padding: "6px 8px",
                       fontSize: 13,
+                      minWidth: 1250,
                     }}
                   >
                     <div
@@ -399,6 +481,10 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       }}
                     >
                       {a.projet || ""}
+                    </div>
+
+                    <div style={{ textAlign: "center", fontWeight: 800 }}>
+                      {a.sectionCour || "—"}
                     </div>
 
                     <div>{a.date || ""}</div>
@@ -420,8 +506,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                           }}
                           title="Cliquer pour agrandir"
                           style={{
-                            width: 140,
-                            height: 70,
+                            width: 120,
+                            height: 60,
                             objectFit: "contain",
                             border: "1px solid #ddd",
                             background: "#fff",
@@ -433,13 +519,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       )}
                     </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "center",
-                        gap: 8,
-                      }}
-                    >
+                    <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -610,13 +690,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
             </div>
 
             <div style={{ padding: 16 }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 14,
-                }}
-              >
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <div style={{ display: "grid", gap: 6 }}>
                   <div style={{ fontWeight: 800, fontSize: 13 }}>Projet</div>
                   <input
@@ -694,6 +768,28 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                 </div>
 
                 <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Section de cour</div>
+                  <select
+                    value={editForm.sectionCour}
+                    onChange={(e) => setEditField("sectionCour", e.target.value)}
+                    style={{
+                      height: 38,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                      background: "#fff",
+                    }}
+                  >
+                    {SECTIONS_COUR.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
                   <div style={{ fontWeight: 800, fontSize: 13 }}>Quantité</div>
                   <input
                     type="number"
@@ -710,24 +806,10 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   />
                 </div>
 
-                <div style={{ display: "grid", gap: 6, gridColumn: "1 / -1" }}>
-                  <div style={{ fontWeight: 800, fontSize: 13 }}>URL du dessin</div>
-                  <input
-                    value={editForm.dessinUrl}
-                    onChange={(e) => setEditField("dessinUrl", e.target.value)}
-                    placeholder="https://..."
-                    style={{
-                      height: 38,
-                      borderRadius: 10,
-                      border: "1px solid #ddd",
-                      padding: "0 10px",
-                      fontSize: 13,
-                    }}
-                  />
-                </div>
-
                 <div
                   style={{
+                    display: "grid",
+                    gap: 10,
                     gridColumn: "1 / -1",
                     border: "1px solid #eee",
                     borderRadius: 12,
@@ -735,25 +817,76 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     background: "#fafafa",
                   }}
                 >
-                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>Aperçu du dessin</div>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Dessin</div>
 
-                  {editForm.dessinUrl ? (
-                    <div style={{ display: "flex", justifyContent: "center" }}>
-                      <img
-                        src={editForm.dessinUrl}
-                        alt="aperçu dessin"
-                        style={{
-                          width: 220,
-                          height: 120,
-                          objectFit: "contain",
-                          border: "1px solid #ddd",
-                          background: "#fff",
-                        }}
-                      />
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                    <div>
+                      {editNewDessinPng ? (
+                        <img
+                          src={editNewDessinPng}
+                          alt="nouveau dessin"
+                          style={{
+                            width: 170,
+                            height: 90,
+                            objectFit: "contain",
+                            border: "1px solid #ddd",
+                            background: "#fff",
+                          }}
+                        />
+                      ) : editForm.dessinUrl ? (
+                        <img
+                          src={editForm.dessinUrl}
+                          alt="dessin actuel"
+                          style={{
+                            width: 170,
+                            height: 90,
+                            objectFit: "contain",
+                            border: "1px solid #ddd",
+                            background: "#fff",
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 170,
+                            height: 90,
+                            border: "1px solid #ddd",
+                            background: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#777",
+                            fontSize: 13,
+                          }}
+                        >
+                          Aucun dessin
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div style={{ color: "#777", fontSize: 13 }}>Aucun dessin.</div>
-                  )}
+
+                    <button
+                      type="button"
+                      onClick={openDrawEdit}
+                      style={{
+                        height: 38,
+                        padding: "0 14px",
+                        borderRadius: 12,
+                        border: "1px solid #1e5eff",
+                        background: "#1e5eff",
+                        color: "#fff",
+                        cursor: "pointer",
+                        fontWeight: 900,
+                      }}
+                    >
+                      Remplacer le dessin
+                    </button>
+
+                    {editNewDessinPng ? (
+                      <span style={{ color: "#168000", fontWeight: 800, fontSize: 13 }}>
+                        Nouveau dessin prêt à enregistrer
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
@@ -824,6 +957,164 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         </div>
       )}
 
+      {drawEditOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.65)",
+            zIndex: 10002,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              width: "min(940px, 96vw)",
+              background: "#fff",
+              borderRadius: 16,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.3)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "12px 14px",
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <div style={{ fontWeight: 900 }}>Remplacer le dessin</div>
+
+              <button
+                onClick={closeDrawEdit}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  border: "1px solid #eee",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 18,
+                  fontWeight: 900,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                display: "grid",
+                gridTemplateColumns: "1fr 170px",
+                gap: 14,
+                alignItems: "start",
+              }}
+            >
+              <div
+                style={{
+                  border: "1px solid #ddd",
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  background: "#fff",
+                  display: "flex",
+                  justifyContent: "center",
+                  padding: 8,
+                }}
+              >
+                <DessinCanvas
+                  mode={drawMode}
+                  clearSignal={drawClearSignal}
+                  undoSignal={drawUndoSignal}
+                  width={620}
+                  height={380}
+                  onExportPNG={(dataUrl) => setEditNewDessinPng(dataUrl)}
+                  penSize={5}
+                />
+              </div>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                <button
+                  className="btn"
+                  onClick={() => setDrawMode("line")}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    background: drawMode === "line" ? "#e8f0ff" : "#fff",
+                    fontWeight: drawMode === "line" ? 800 : 700,
+                  }}
+                >
+                  📏 Ligne droite
+                </button>
+
+                <button
+                  className="btn"
+                  onClick={() => setDrawMode("free")}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    background: drawMode === "free" ? "#e8f0ff" : "#fff",
+                    fontWeight: drawMode === "free" ? 800 : 700,
+                  }}
+                >
+                  ✏️ Dessin libre
+                </button>
+
+                <button
+                  className="btn"
+                  onClick={() => setDrawMode("text")}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #ddd",
+                    background: drawMode === "text" ? "#e8f0ff" : "#fff",
+                    fontWeight: drawMode === "text" ? 800 : 700,
+                  }}
+                >
+                  📝 Ajouter texte
+                </button>
+
+                <button className="btn" onClick={() => setDrawUndoSignal((n) => n + 1)}>
+                  ↩ Retour
+                </button>
+
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setEditNewDessinPng(null);
+                    setDrawClearSignal((n) => n + 1);
+                  }}
+                >
+                  🗑️ Effacer dessin
+                </button>
+
+                <button
+                  onClick={confirmerNouveauDessin}
+                  style={{
+                    marginTop: 12,
+                    height: 40,
+                    borderRadius: 12,
+                    border: "1px solid #168000",
+                    background: "#168000",
+                    color: "#fff",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  Utiliser ce dessin
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {reqOpen && (
         <div
           style={{
@@ -862,8 +1153,11 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               }}
             >
               <div style={{ fontWeight: 900, fontSize: 16 }}>
-                {reqStep === 1 ? "Créer une réquisition — Sélection" : "Créer une réquisition — Détails"}
+                {reqStep === 1
+                  ? "Créer une réquisition — Sélection"
+                  : "Créer une réquisition — Détails"}
               </div>
+
               <button
                 onClick={closeReq}
                 style={{
@@ -886,7 +1180,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               {reqStep === 1 ? (
                 <>
                   <div style={{ fontSize: 13, color: "#444", marginBottom: 10 }}>
-                    Sélectionne une ou plusieurs moulures ici. Sélection: <b>{reqSelected.size}</b>
+                    Sélectionne une ou plusieurs moulures ici. Sélection:{" "}
+                    <b>{reqSelected.size}</b>
                   </div>
 
                   <div
@@ -903,6 +1198,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       ) : (
                         banque.map((it) => {
                           const checked = reqSelected.has(it.id);
+
                           return (
                             <div
                               key={it.id}
@@ -938,6 +1234,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                                 >
                                   {it.materiel || "(sans matériel)"}
                                 </div>
+
                                 <div
                                   style={{
                                     fontSize: 12,
@@ -947,7 +1244,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                                     whiteSpace: "nowrap",
                                   }}
                                 >
-                                  {it.categorie || ""} • {it.calibre || ""} • source: {it.projet || ""}
+                                  {it.categorie || ""} • Calibre {it.calibre || ""} • Section{" "}
+                                  {it.sectionCour || "—"} • source: {it.projet || ""}
                                 </div>
                               </div>
 
@@ -979,114 +1277,121 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   ) : null}
                 </>
               ) : (
-                <>
-                  <div style={{ display: "grid", gap: 12 }}>
-                    <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-                      <div style={{ fontWeight: 900, marginBottom: 8 }}>Quantités demandées</div>
-                      <div style={{ display: "grid", gap: 8 }}>
-                        {reqSelectedList.map((it) => (
-                          <div
-                            key={it.id}
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "1fr 120px",
-                              gap: 10,
-                              alignItems: "center",
-                              padding: "8px 10px",
-                              borderRadius: 12,
-                              border: "1px solid #eee",
-                              background: "#fff",
-                            }}
-                          >
-                            <div style={{ fontSize: 13, overflow: "hidden" }}>
-                              <div
-                                style={{
-                                  fontWeight: 900,
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                {it.materiel || "(sans matériel)"}
-                              </div>
-                              <div style={{ color: "#666", fontSize: 12 }}>
-                                {it.categorie || ""} • {it.calibre || ""} • source: {it.projet || ""}
-                              </div>
-                            </div>
-                            <input
-                              type="number"
-                              min={0}
-                              value={reqQtyById[it.id] ?? 1}
-                              onChange={(e) => {
-                                const v = Number(e.target.value);
-                                setReqQtyById((p) => ({ ...p, [it.id]: Number.isFinite(v) ? v : 0 }));
-                              }}
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 8 }}>Quantités demandées</div>
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {reqSelectedList.map((it) => (
+                        <div
+                          key={it.id}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 120px",
+                            gap: 10,
+                            alignItems: "center",
+                            padding: "8px 10px",
+                            borderRadius: 12,
+                            border: "1px solid #eee",
+                            background: "#fff",
+                          }}
+                        >
+                          <div style={{ fontSize: 13, overflow: "hidden" }}>
+                            <div
                               style={{
-                                height: 34,
-                                borderRadius: 10,
-                                border: "1px solid #ddd",
-                                padding: "0 10px",
-                                fontWeight: 800,
-                                textAlign: "center",
+                                fontWeight: 900,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
                               }}
-                            />
+                            >
+                              {it.materiel || "(sans matériel)"}
+                            </div>
+
+                            <div style={{ color: "#666", fontSize: 12 }}>
+                              {it.categorie || ""} • Calibre {it.calibre || ""} • Section{" "}
+                              {it.sectionCour || "—"} • source: {it.projet || ""}
+                            </div>
                           </div>
-                        ))}
-                      </div>
+
+                          <input
+                            type="number"
+                            min={0}
+                            value={reqQtyById[it.id] ?? 1}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setReqQtyById((p) => ({
+                                ...p,
+                                [it.id]: Number.isFinite(v) ? v : 0,
+                              }));
+                            }}
+                            style={{
+                              height: 34,
+                              borderRadius: 10,
+                              border: "1px solid #ddd",
+                              padding: "0 10px",
+                              fontWeight: 800,
+                              textAlign: "center",
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                      Projet à envoyer + note
                     </div>
 
-                    <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-                      <div style={{ fontWeight: 900, marginBottom: 8 }}>Projet à envoyer + note</div>
-
-                      <div style={{ display: "grid", gap: 8 }}>
-                        <div style={{ fontSize: 13, fontWeight: 800 }}>Projet à envoyer</div>
-                        <input
-                          value={reqProjetEnvoye}
-                          onChange={(e) => setReqProjetEnvoye(e.target.value)}
-                          placeholder="Ex: Projet ABC / Chantier X"
-                          style={{
-                            height: 36,
-                            borderRadius: 10,
-                            border: "1px solid #ddd",
-                            padding: "0 10px",
-                            fontSize: 13,
-                          }}
-                        />
-
-                        <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6 }}>Note</div>
-                        <textarea
-                          value={reqNote}
-                          onChange={(e) => setReqNote(e.target.value)}
-                          placeholder="Note (optionnel)"
-                          rows={4}
-                          style={{
-                            borderRadius: 10,
-                            border: "1px solid #ddd",
-                            padding: 10,
-                            fontSize: 13,
-                            resize: "vertical",
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {reqError ? (
-                      <div
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800 }}>Projet à envoyer</div>
+                      <input
+                        value={reqProjetEnvoye}
+                        onChange={(e) => setReqProjetEnvoye(e.target.value)}
+                        placeholder="Ex: Projet ABC / Chantier X"
                         style={{
-                          border: "1px solid #ffd2d2",
-                          background: "#fff5f5",
-                          color: "#c40000",
-                          padding: 10,
-                          borderRadius: 12,
-                          fontWeight: 800,
+                          height: 36,
+                          borderRadius: 10,
+                          border: "1px solid #ddd",
+                          padding: "0 10px",
                           fontSize: 13,
                         }}
-                      >
-                        {reqError}
-                      </div>
-                    ) : null}
+                      />
+
+                      <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6 }}>Note</div>
+                      <textarea
+                        value={reqNote}
+                        onChange={(e) => setReqNote(e.target.value)}
+                        placeholder="Note (optionnel)"
+                        rows={4}
+                        style={{
+                          borderRadius: 10,
+                          border: "1px solid #ddd",
+                          padding: 10,
+                          fontSize: 13,
+                          resize: "vertical",
+                        }}
+                      />
+                    </div>
                   </div>
-                </>
+
+                  {reqError ? (
+                    <div
+                      style={{
+                        border: "1px solid #ffd2d2",
+                        background: "#fff5f5",
+                        color: "#c40000",
+                        padding: 10,
+                        borderRadius: 12,
+                        fontWeight: 800,
+                        fontSize: 13,
+                      }}
+                    >
+                      {reqError}
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
 
