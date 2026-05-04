@@ -15,7 +15,7 @@ function formatDateYYYYMMDD(d) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-const MATERIELS = ["Blanc Embossé", "Blanc Lisse", "Galvanisé", "Grade B"];
+const MATERIELS = ["Blanc Embossé", "Blanc Brillant", "Galvanisé", "Grade B", "Autre"];
 const CALIBRES = Array.from({ length: (28 - 12) / 2 + 1 }, (_, i) => String(12 + i * 2));
 
 const MOULURES_SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
@@ -66,6 +66,7 @@ export default function PageRetourMateriaux() {
 
   // ---- Moulures ----
   const [materiel, setMateriel] = useState("");
+  const [materielAutre, setMaterielAutre] = useState("");
   const [calibre, setCalibre] = useState("");
   const [mSectionCour, setMSectionCour] = useState("");
 
@@ -120,6 +121,7 @@ export default function PageRetourMateriaux() {
     setSelectedId(null);
 
     setMateriel("");
+    setMaterielAutre("");
     setCalibre("");
     setMSectionCour("");
     setDernierDessinPng(null);
@@ -159,6 +161,14 @@ export default function PageRetourMateriaux() {
 
     if (categorie === "Moulures") {
       if (!materiel) return alert("Choisis un matériel.");
+
+      const materielFinal =
+        materiel === "Autre" ? String(materielAutre || "").trim() : materiel;
+
+      if (materiel === "Autre" && !materielFinal) {
+        return alert("Entre le matériel.");
+      }
+
       if (!calibre) return alert("Choisis un calibre.");
       if (!mSectionCour) return alert("Choisis une section de cour.");
 
@@ -169,7 +179,7 @@ export default function PageRetourMateriaux() {
         categorie: "Moulures",
         quantite: qNum,
         dessinPng: dernierDessinPng || null,
-        materiel,
+        materiel: materielFinal,
         calibre,
         sectionCour: mSectionCour,
       };
@@ -381,6 +391,31 @@ export default function PageRetourMateriaux() {
               boxSizing: "border-box",
             }}
           >
+            {categorie === "Moulures" && (
+              <div
+                style={{
+                  width: "100%",
+                  marginBottom: 12,
+                  border: "2px solid #222",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  background: "#fff",
+                }}
+              >
+                <img
+                  src={zoneTerrainPanneaux}
+                  alt="Zones du terrain extérieur"
+                  style={{
+                    width: "100%",
+                    height: isIPad ? 135 : 170,
+                    objectFit: "contain",
+                    display: "block",
+                    background: "#fff",
+                  }}
+                />
+              </div>
+            )}
+
             <label>Catégorie:</label>
             <select
               className="selectYellow"
@@ -451,7 +486,11 @@ export default function PageRetourMateriaux() {
                   <select
                     className="selectGray"
                     value={materiel}
-                    onChange={(e) => setMateriel(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setMateriel(v);
+                      if (v !== "Autre") setMaterielAutre("");
+                    }}
                     style={{ width: layout.selectWidth }}
                   >
                     <option value=""></option>
@@ -462,6 +501,19 @@ export default function PageRetourMateriaux() {
                     ))}
                   </select>
                 </div>
+
+                {materiel === "Autre" && (
+                  <div className="fieldRow" style={{ marginTop: 8 }}>
+                    <div style={{ width: 88 }}></div>
+                    <input
+                      className="inputWide"
+                      style={{ width: layout.inputWide }}
+                      placeholder="Écrire matériel..."
+                      value={materielAutre}
+                      onChange={(e) => setMaterielAutre(e.target.value)}
+                    />
+                  </div>
+                )}
 
                 <div className="fieldRow" style={{ marginTop: isIPad ? 14 : 24 }}>
                   <div style={{ fontSize: layout.labelFont, fontWeight: 700, width: 88 }}>

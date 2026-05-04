@@ -645,9 +645,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
             padding: 16,
             boxSizing: "border-box",
           }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeEdit();
-          }}
         >
           <div
             style={{
