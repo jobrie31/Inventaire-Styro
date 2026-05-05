@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
 
-import { db, storage } from "./firebaseConfig";
+import { db, storage, auth } from "./firebaseConfig";
 import { CLIENT_ID } from "./appClient";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
@@ -13,6 +13,16 @@ function formatDateYYYYMMDD(d) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function currentUserInfo() {
+  const user = auth?.currentUser || null;
+
+  return {
+    uid: user?.uid || "",
+    email: user?.email || "",
+    name: user?.displayName || user?.email || "Utilisateur inconnu",
+  };
 }
 
 const MATERIELS = ["Blanc Embossé", "Blanc Brillant", "Galvanisé", "Grade B", "Autre"];
@@ -266,6 +276,8 @@ export default function PageRetourMateriaux() {
     setIsSaving(true);
 
     try {
+      const actor = currentUserInfo();
+
       for (const a of articles) {
         let dessinUrl = null;
         let dessinPath = null;
@@ -297,7 +309,16 @@ export default function PageRetourMateriaux() {
           quantite: a.quantite,
           dessinUrl,
           dessinPath,
+
+          createdByUid: actor.uid,
+          createdByEmail: actor.email,
+          createdByName: actor.name,
+          updatedByUid: actor.uid,
+          updatedByEmail: actor.email,
+          updatedByName: actor.name,
+
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         };
 
         if (a.categorie === "Moulures") {

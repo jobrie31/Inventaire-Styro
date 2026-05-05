@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
-import { db, storage } from "./firebaseConfig";
+import { db, storage, auth } from "./firebaseConfig";
 import { CLIENT_ID } from "./appClient";
 import {
   collection,
@@ -14,30 +14,91 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
+  addDoc,
 } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import MouluresExcelButton from "./MouluresExcelButton.jsx";
 
 const SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
 
+function currentUserInfo() {
+  const user = auth?.currentUser || null;
+
+  return {
+    uid: user?.uid || "",
+    email: user?.email || "",
+    name: user?.displayName || user?.email || "Utilisateur inconnu",
+  };
+}
+
+function cleanValue(v) {
+  if (v === undefined || v === null) return "";
+  return v;
+}
+
+function sameValue(a, b) {
+  return String(cleanValue(a)).trim() === String(cleanValue(b)).trim();
+}
+
+function buildChanges(before, after, fields) {
+  const changes = {};
+
+  fields.forEach((f) => {
+    const b = cleanValue(before?.[f]);
+    const a = cleanValue(after?.[f]);
+
+    if (!sameValue(b, a)) {
+      changes[f] = {
+        before: b,
+        after: a,
+      };
+    }
+  });
+
+  return changes;
+}
+
+function moulureShortLabel(m) {
+  return [
+    m.materiel || "Moulure",
+    m.calibre ? `calibre ${m.calibre}` : "",
+    m.quantite !== undefined && m.quantite !== "" ? `Qté ${m.quantite}` : "",
+    m.sectionCour ? `Section ${m.sectionCour}` : "",
+    m.projet ? `Projet ${m.projet}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [banque, setBanque] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [modalUrl, setModalUrl] = useState(null);
 
-  const [reqOpen, setReqOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    projet: "",
+    sectionCour: "",
+    date: "",
+    materiel: "",
+    calibre: "",
+  });
+
+  const [reqMode, setReqMode] = useState(false);
+  const [reqConfirmOpen, setReqConfirmOpen] = useState(false);
   const [reqSelected, setReqSelected] = useState(() => new Set());
-  const [reqStep, setReqStep] = useState(1);
   const [reqQtyById, setReqQtyById] = useState({});
   const [reqProjetEnvoye, setReqProjetEnvoye] = useState("");
   const [reqNote, setReqNote] = useState("");
   const [reqSaving, setReqSaving] = useState(false);
   const [reqError, setReqError] = useState("");
+
   const [deletingId, setDeletingId] = useState(null);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
+  const [oldRowBeforeEdit, setOldRowBeforeEdit] = useState(null);
+
   const [editForm, setEditForm] = useState({
     id: "",
     projet: "",
@@ -77,47 +138,123 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       if (e.key === "Escape") {
         setModalUrl(null);
         if (drawEditOpen) closeDrawEdit();
-        if (reqOpen) closeReq();
+        if (reqConfirmOpen) closeReqConfirm();
         if (editOpen) closeEdit();
       }
     }
 
-    if (modalUrl || reqOpen || editOpen || drawEditOpen) {
+    if (modalUrl || reqConfirmOpen || editOpen || drawEditOpen) {
       window.addEventListener("keydown", onKeyDown);
     }
 
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalUrl, reqOpen, editOpen, drawEditOpen]);
+  }, [modalUrl, reqConfirmOpen, editOpen, drawEditOpen]);
 
-  function openReq() {
-    setReqOpen(true);
-    setReqStep(1);
-    setReqSelected(new Set());
-    setReqQtyById({});
-    setReqProjetEnvoye("");
-    setReqNote("");
-    setReqSaving(false);
-    setReqError("");
+  function setFilterField(name, value) {
+    setFilters((prev) => ({ ...prev, [name]: value }));
   }
 
-  function closeReq() {
-    setReqOpen(false);
-    setReqStep(1);
-    setReqSelected(new Set());
-    setReqQtyById({});
-    setReqProjetEnvoye("");
-    setReqNote("");
-    setReqSaving(false);
-    setReqError("");
-  }
-
-  function toggleReqSelect(id) {
-    setReqSelected((prev) => {
-      const s = new Set(prev);
-      if (s.has(id)) s.delete(id);
-      else s.add(id);
-      return s;
+  function clearFilters() {
+    setFilters({
+      projet: "",
+      sectionCour: "",
+      date: "",
+      materiel: "",
+      calibre: "",
     });
+  }
+
+  function uniqueValues(field) {
+    const values = banque
+      .map((x) => String(x?.[field] ?? "").trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(values)).sort((a, b) =>
+      a.localeCompare(b, "fr", { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  const projetOptions = useMemo(() => uniqueValues("projet"), [banque]);
+  const materielOptions = useMemo(() => uniqueValues("materiel"), [banque]);
+  const calibreOptions = useMemo(() => uniqueValues("calibre"), [banque]);
+
+  const filteredBanque = useMemo(() => {
+    return banque.filter((a) => {
+      const projetOk = !filters.projet || String(a.projet || "") === filters.projet;
+      const sectionOk =
+        !filters.sectionCour || String(a.sectionCour || "") === filters.sectionCour;
+      const dateOk = !filters.date || String(a.date || "") === filters.date;
+      const materielOk =
+        !filters.materiel || String(a.materiel || "") === filters.materiel;
+      const calibreOk = !filters.calibre || String(a.calibre || "") === filters.calibre;
+
+      return projetOk && sectionOk && dateOk && materielOk && calibreOk;
+    });
+  }, [banque, filters]);
+
+  function startReqMode() {
+    setReqMode(true);
+    setReqConfirmOpen(false);
+    setReqSelected(new Set());
+    setReqQtyById({});
+    setReqProjetEnvoye("");
+    setReqNote("");
+    setReqSaving(false);
+    setReqError("");
+  }
+
+  function cancelReqMode() {
+    setReqMode(false);
+    setReqConfirmOpen(false);
+    setReqSelected(new Set());
+    setReqQtyById({});
+    setReqProjetEnvoye("");
+    setReqNote("");
+    setReqSaving(false);
+    setReqError("");
+  }
+
+  function closeReqConfirm() {
+    setReqConfirmOpen(false);
+    setReqSaving(false);
+    setReqError("");
+  }
+
+  function choisirMoulurePourReq(id) {
+    setReqSelected((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+
+    setReqQtyById((prev) => ({
+      ...prev,
+      [id]: prev[id] ?? 1,
+    }));
+  }
+
+  function retirerMoulureReq(id) {
+    setReqSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    setReqQtyById((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function terminerSelectionReq() {
+    if (reqSelected.size === 0) {
+      setReqError("Choisis au moins 1 moulure.");
+      return;
+    }
+
+    setReqError("");
+    setReqConfirmOpen(true);
   }
 
   const reqSelectedList = useMemo(() => {
@@ -126,17 +263,9 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     return ids.map((id) => map.get(id)).filter(Boolean);
   }, [reqSelected, banque]);
 
-  function ensureQtyDefaults() {
-    setReqQtyById((prev) => {
-      const next = { ...prev };
-      for (const it of reqSelectedList) {
-        if (next[it.id] == null) next[it.id] = 1;
-      }
-      return next;
-    });
-  }
-
   function openEdit(row) {
+    setOldRowBeforeEdit({ ...row });
+
     setEditForm({
       id: row.id || "",
       projet: row.projet || "",
@@ -166,6 +295,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     setEditError("");
     setEditNewDessinPng(null);
     setDrawEditOpen(false);
+    setOldRowBeforeEdit(null);
     setEditForm({
       id: "",
       projet: "",
@@ -197,6 +327,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       alert("Fais un dessin avant de confirmer.");
       return;
     }
+
     setDrawEditOpen(false);
   }
 
@@ -250,6 +381,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       return setEditError("Entre une quantité valide.");
     }
 
+    const oldRow = oldRowBeforeEdit || banque.find((x) => x.id === id) || {};
+
     const ok = window.confirm("Confirmer les modifications de cette moulure ?");
     if (!ok) return;
 
@@ -257,9 +390,10 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     setEditError("");
 
     try {
+      const actor = currentUserInfo();
       const { dessinUrl, dessinPath } = await uploadNewDessinIfNeeded(id);
 
-      await updateDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id), {
+      const newData = {
         projet,
         date,
         categorie,
@@ -269,7 +403,63 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         quantite: quantiteNum,
         dessinUrl,
         dessinPath,
+      };
+
+      const afterForCompare = {
+        ...oldRow,
+        ...newData,
+      };
+
+      const compareFields = [
+        "projet",
+        "date",
+        "categorie",
+        "materiel",
+        "calibre",
+        "sectionCour",
+        "quantite",
+        "dessinUrl",
+      ];
+
+      const changes = buildChanges(oldRow, afterForCompare, compareFields);
+
+      if (Object.keys(changes).length === 0) {
+        closeEdit();
+        return;
+      }
+
+      await updateDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id), {
+        ...newData,
+
+        updatedByUid: actor.uid,
+        updatedByEmail: actor.email,
+        updatedByName: actor.name,
+
         updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, "clients", CLIENT_ID, "historique"), {
+        action: "moulure_modification",
+        titre: "Moulure modifiée",
+        module: "moulures",
+        cibleId: id,
+        cibleType: "banqueMoulures",
+        description: `Moulure modifiée : ${moulureShortLabel(afterForCompare)}`,
+
+        before: oldRow,
+        after: afterForCompare,
+        changes,
+
+        updatedByUid: actor.uid,
+        updatedByEmail: actor.email,
+        updatedByName: actor.name,
+        createdByUid: actor.uid,
+        createdByEmail: actor.email,
+        createdByName: actor.name,
+        userEmail: actor.email,
+        userName: actor.name,
+
+        createdAt: serverTimestamp(),
       });
 
       closeEdit();
@@ -288,6 +478,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     if (!ok) return;
 
     setDeletingId(id);
+
     try {
       await deleteDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id));
       if (selectedId === id) setSelectedId(null);
@@ -303,7 +494,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     setReqError("");
 
     if (reqSelected.size === 0) {
-      setReqError("Sélectionne au moins 1 moulure.");
+      setReqError("Choisis au moins 1 moulure.");
       return;
     }
 
@@ -312,49 +503,141 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       return;
     }
 
+    const invalidQty = reqSelectedList.some((it) => {
+      const q = Number(reqQtyById[it.id]);
+      return !Number.isFinite(q) || q <= 0;
+    });
+
+    if (invalidQty) {
+      setReqError("Toutes les quantités doivent être plus grandes que 0.");
+      return;
+    }
+
     setReqSaving(true);
 
     try {
+      const actor = currentUserInfo();
       const counterRef = doc(db, "clients", CLIENT_ID, "_counters", "reqMoulures");
 
       const { reqId, reqNum } = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(counterRef);
-        const next = snap.exists() ? Number(snap.data()?.next ?? 1) : 1;
+        const counterSnap = await tx.get(counterRef);
+        const next = counterSnap.exists() ? Number(counterSnap.data()?.next ?? 1) : 1;
         const reqNum = Number.isFinite(next) && next > 0 ? next : 1;
-
         const reqId = `reqmoul${reqNum}`;
+
+        const itemRefs = reqSelectedList.map((it) => ({
+          item: it,
+          ref: doc(db, "clients", CLIENT_ID, "banqueMoulures", it.id),
+          qtyDemandee: Number(reqQtyById[it.id] ?? 1) || 1,
+        }));
+
+        const itemSnaps = [];
+
+        for (const x of itemRefs) {
+          const snap = await tx.get(x.ref);
+          itemSnaps.push({ ...x, snap });
+        }
+
+        for (const x of itemSnaps) {
+          if (!x.snap.exists()) {
+            throw new Error(`La moulure ${x.item.id} n'existe plus.`);
+          }
+
+          const data = x.snap.data();
+          const stockActuel = Number(data.quantite ?? 0);
+
+          if (!Number.isFinite(stockActuel)) {
+            throw new Error(`Quantité invalide pour la moulure ${x.item.id}.`);
+          }
+
+          if (x.qtyDemandee > stockActuel) {
+            throw new Error(
+              `Quantité insuffisante pour ${data.materiel || "moulure"}. Stock: ${stockActuel}, demandé: ${x.qtyDemandee}.`
+            );
+          }
+        }
+
+        const items = itemSnaps.map((x) => {
+          const data = x.snap.data();
+
+          return {
+            banqueId: x.item.id,
+            projetSource: data.projet || "",
+            date: data.date || "",
+            categorie: data.categorie || "",
+            materiel: data.materiel || "",
+            calibre: data.calibre || "",
+            sectionCour: data.sectionCour || "",
+            dessinUrl: data.dessinUrl || "",
+            dessinPath: data.dessinPath || "",
+            quantiteStockAvant: Number(data.quantite ?? 0) || 0,
+            quantiteStockApres: (Number(data.quantite ?? 0) || 0) - x.qtyDemandee,
+            quantiteDemande: x.qtyDemandee,
+          };
+        });
+
+        const reqRef = doc(db, "clients", CLIENT_ID, "requisitionsMoulures", reqId);
+        const histRef = doc(collection(db, "clients", CLIENT_ID, "historique"));
+
         tx.set(counterRef, { next: reqNum + 1 }, { merge: true });
+
+        tx.set(reqRef, {
+          reqId,
+          reqNum,
+          type: "moulures",
+          status: "demande",
+          projetEnvoye: String(reqProjetEnvoye || "").trim(),
+          note: String(reqNote || "").trim(),
+          items,
+
+          createdByUid: actor.uid,
+          createdByEmail: actor.email,
+          createdByName: actor.name,
+          updatedByUid: actor.uid,
+          updatedByEmail: actor.email,
+          updatedByName: actor.name,
+
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.set(histRef, {
+          action: "requisition_moulures_creation",
+          titre: "Réquisition moulures créée",
+          module: "requisitions",
+          cibleId: reqId,
+          cibleType: "requisitionsMoulures",
+          description: `Réquisition ${reqId} créée avec ${items.length} ligne(s)`,
+          reqId,
+          items,
+
+          createdByUid: actor.uid,
+          createdByEmail: actor.email,
+          createdByName: actor.name,
+          userEmail: actor.email,
+          userName: actor.name,
+
+          createdAt: serverTimestamp(),
+        });
+
+        for (const x of itemSnaps) {
+          const data = x.snap.data();
+          const stockActuel = Number(data.quantite ?? 0);
+          const nouveauStock = stockActuel - x.qtyDemandee;
+
+          tx.update(x.ref, {
+            quantite: nouveauStock,
+            updatedByUid: actor.uid,
+            updatedByEmail: actor.email,
+            updatedByName: actor.name,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
         return { reqId, reqNum };
       });
 
-      const items = reqSelectedList.map((it) => ({
-        banqueId: it.id,
-        projetSource: it.projet || "",
-        date: it.date || "",
-        categorie: it.categorie || "",
-        materiel: it.materiel || "",
-        calibre: it.calibre || "",
-        sectionCour: it.sectionCour || "",
-        dessinUrl: it.dessinUrl || "",
-        dessinPath: it.dessinPath || "",
-        quantiteDemande: Number(reqQtyById[it.id] ?? 1) || 1,
-      }));
-
-      const reqRef = doc(db, "clients", CLIENT_ID, "requisitionsMoulures", reqId);
-
-      await setDoc(reqRef, {
-        reqId,
-        reqNum,
-        type: "moulures",
-        status: "brouillon",
-        projetEnvoye: String(reqProjetEnvoye || "").trim(),
-        note: String(reqNote || "").trim(),
-        items,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      closeReq();
+      cancelReqMode();
 
       if (typeof onGoRequisition === "function") {
         onGoRequisition(reqId);
@@ -363,16 +646,35 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       }
     } catch (e) {
       console.error(e);
-      setReqError("Erreur lors de la création de la réquisition.");
+      setReqError(e?.message || "Erreur lors de la création de la réquisition.");
     } finally {
       setReqSaving(false);
     }
   }
 
-  const gridCols = "170px 130px 120px 140px 170px 110px 110px 160px 190px";
+  const gridCols = "170px 130px 120px 170px 110px 110px 160px 190px";
+  const tableMinWidth = 1160;
+
+  const filterInputStyle = {
+    width: "100%",
+    height: 32,
+    borderRadius: 8,
+    border: "1px solid #cfd8e3",
+    padding: "0 8px",
+    fontSize: 12,
+    fontWeight: 700,
+    boxSizing: "border-box",
+    background: "#fff",
+  };
 
   return (
-    <div className="pageRM pageRM--full">
+    <div
+      className="pageRM pageRM--full"
+      style={{
+        background: reqMode ? "#d9dde5" : undefined,
+        transition: "background 0.2s ease",
+      }}
+    >
       <div className="topBar topBar--full">
         <div className="leftLinks">
           <button className="btn" style={{ width: 180, height: 34 }} onClick={onRetour}>
@@ -396,29 +698,96 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         >
           <span>Tableau Moulure</span>
 
-          <button
-            onClick={openReq}
-            style={{
-              height: 36,
-              padding: "0 14px",
-              borderRadius: 10,
-              border: "1px solid #1e5eff",
-              background: "#1e5eff",
-              color: "#fff",
-              fontWeight: 800,
-              cursor: "pointer",
-              boxShadow: "0 6px 14px rgba(30,94,255,0.18)",
-              fontSize: 13,
-            }}
-            title="Créer une réquisition"
-          >
-            + Créer une réquisition
-          </button>
+          {!reqMode ? (
+            <button
+              onClick={startReqMode}
+              style={{
+                height: 36,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #1e5eff",
+                background: "#1e5eff",
+                color: "#fff",
+                fontWeight: 800,
+                cursor: "pointer",
+                boxShadow: "0 6px 14px rgba(30,94,255,0.18)",
+                fontSize: 13,
+              }}
+              title="Créer une réquisition"
+            >
+              + Créer une réquisition
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={terminerSelectionReq}
+                style={{
+                  height: 36,
+                  padding: "0 14px",
+                  borderRadius: 10,
+                  border: "1px solid #168000",
+                  background: "#168000",
+                  color: "#fff",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  boxShadow: "0 6px 14px rgba(22,128,0,0.18)",
+                  fontSize: 13,
+                }}
+              >
+                Terminer la sélection ({reqSelected.size})
+              </button>
 
-          <MouluresExcelButton rows={banque} />
+              <button
+                onClick={cancelReqMode}
+                style={{
+                  height: 36,
+                  padding: "0 14px",
+                  borderRadius: 10,
+                  border: "1px solid #d33",
+                  background: "#fff",
+                  color: "#d33",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                Annuler
+              </button>
+            </>
+          )}
+
+          <MouluresExcelButton rows={filteredBanque} />
         </div>
         <div />
       </div>
+
+      {reqMode ? (
+        <div
+          style={{
+            margin: "0 auto 10px auto",
+            width: "min(1160px, calc(100vw - 24px))",
+            border: "1px solid #f1c40f",
+            background: "#fff8d8",
+            color: "#4d3b00",
+            padding: "10px 12px",
+            borderRadius: 12,
+            fontWeight: 900,
+            fontSize: 13,
+            boxSizing: "border-box",
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>
+            Mode réquisition actif : clique sur <b>Choisir</b>, entre la quantité,
+            puis clique sur <b>Terminer la sélection</b>.
+          </span>
+
+          {reqError ? <span style={{ color: "#c40000" }}>{reqError}</span> : null}
+        </div>
+      ) : null}
 
       <div
         className="tableZone tableZone--center"
@@ -427,34 +796,156 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
           maxWidth: "100vw",
           overflowX: "auto",
           WebkitOverflowScrolling: "touch",
+          padding: reqMode ? "12px" : undefined,
+          boxSizing: "border-box",
         }}
       >
         <div
           className="tableBox tableBox--full"
           style={{
-            minWidth: 1250,
+            minWidth: tableMinWidth,
+            opacity: reqMode ? 1 : 1,
+            border: reqMode ? "3px solid #1e5eff" : undefined,
+            boxShadow: reqMode
+              ? "0 0 0 9999px rgba(0,0,0,0.25), 0 18px 40px rgba(0,0,0,0.25)"
+              : undefined,
+            borderRadius: reqMode ? 14 : undefined,
+            overflow: "hidden",
+            background: "#fff",
+            position: "relative",
+            zIndex: reqMode ? 2 : undefined,
           }}
         >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: gridCols,
+              alignItems: "center",
+              gap: 0,
+              padding: "8px 8px",
+              borderBottom: "1px solid #d9e2ef",
+              background: "#f6f9ff",
+              minWidth: tableMinWidth,
+            }}
+          >
+            <div style={{ paddingRight: 8 }}>
+              <select
+                value={filters.projet}
+                onChange={(e) => setFilterField("projet", e.target.value)}
+                style={filterInputStyle}
+              >
+                <option value="">Projet</option>
+                {projetOptions.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ paddingRight: 8 }}>
+              <select
+                value={filters.sectionCour}
+                onChange={(e) => setFilterField("sectionCour", e.target.value)}
+                style={filterInputStyle}
+              >
+                <option value="">Section cour</option>
+                {SECTIONS_COUR.filter(Boolean).map((s) => (
+                  <option key={s} value={s}>
+                    Section {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ paddingRight: 8 }}>
+              <input
+                type="date"
+                value={filters.date}
+                onChange={(e) => setFilterField("date", e.target.value)}
+                style={filterInputStyle}
+              />
+            </div>
+
+            <div style={{ paddingRight: 8 }}>
+              <select
+                value={filters.materiel}
+                onChange={(e) => setFilterField("materiel", e.target.value)}
+                style={filterInputStyle}
+              >
+                <option value="">Matériel</option>
+                {materielOptions.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ paddingRight: 8 }}>
+              <select
+                value={filters.calibre}
+                onChange={(e) => setFilterField("calibre", e.target.value)}
+                style={{ ...filterInputStyle, textAlign: "center" }}
+              >
+                <option value="">Calibre</option>
+                {calibreOptions.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ textAlign: "center", color: "#777", fontSize: 12, fontWeight: 800 }}>
+              Quantité
+            </div>
+
+            <div style={{ textAlign: "center", color: "#777", fontSize: 12, fontWeight: 800 }}>
+              Dessin
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <button
+                onClick={clearFilters}
+                style={{
+                  height: 32,
+                  padding: "0 12px",
+                  borderRadius: 9,
+                  border: "1px solid #cfd8e3",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 900,
+                }}
+                title="Réinitialiser les filtres"
+              >
+                Réinitialiser
+              </button>
+            </div>
+          </div>
+
           <div className="tableHeader" style={{ gridTemplateColumns: gridCols }}>
             <div>Projet</div>
             <div>Section cour</div>
             <div>Date</div>
-            <div>Catégorie</div>
             <div>Matériel</div>
             <div>Calibre</div>
             <div>Quantité</div>
             <div>Dessin</div>
-            <div style={{ textAlign: "center" }}>Actions</div>
+            <div style={{ textAlign: "center" }}>{reqMode ? "Choisir" : "Actions"}</div>
           </div>
 
           <div className="tableScroll">
-            {banque.length === 0 ? (
+            {filteredBanque.length === 0 ? (
               <div className="tableBody" style={{ padding: 10 }}>
-                (Banque vide)
+                {banque.length === 0 ? "(Banque vide)" : "(Aucun résultat avec les filtres)"}
               </div>
             ) : (
-              banque.map((a) => {
+              filteredBanque.map((a) => {
                 const selected = a.id === selectedId;
+                const chosen = reqSelected.has(a.id);
+                const qty = reqQtyById[a.id] ?? 1;
 
                 return (
                   <div
@@ -465,11 +956,11 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       gridTemplateColumns: gridCols,
                       alignItems: "center",
                       borderBottom: "1px solid #eee",
-                      background: selected ? "#dfefff" : "#fff",
+                      background: chosen ? "#e9ffe6" : selected ? "#dfefff" : "#fff",
                       cursor: "pointer",
                       padding: "6px 8px",
                       fontSize: 13,
-                      minWidth: 1250,
+                      minWidth: tableMinWidth,
                     }}
                   >
                     <div
@@ -488,7 +979,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     </div>
 
                     <div>{a.date || ""}</div>
-                    <div>{a.categorie || ""}</div>
                     <div>{a.materiel || ""}</div>
                     <div style={{ textAlign: "center" }}>{a.calibre || ""}</div>
                     <div style={{ textAlign: "center", fontWeight: 700 }}>{a.quantite ?? ""}</div>
@@ -520,50 +1010,133 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     </div>
 
                     <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEdit(a);
-                        }}
-                        title="Modifier"
-                        style={{
-                          minWidth: 82,
-                          height: 34,
-                          borderRadius: 10,
-                          border: "1px solid #1e5eff",
-                          background: "#1e5eff",
-                          color: "#fff",
-                          fontWeight: 800,
-                          fontSize: 12,
-                          cursor: "pointer",
-                          padding: "0 10px",
-                        }}
-                      >
-                        Modifier
-                      </button>
+                      {reqMode ? (
+                        chosen ? (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <input
+                              type="number"
+                              min={1}
+                              value={qty}
+                              onChange={(e) => {
+                                const v = Number(e.target.value);
+                                setReqQtyById((prev) => ({
+                                  ...prev,
+                                  [a.id]: Number.isFinite(v) ? v : 1,
+                                }));
+                              }}
+                              style={{
+                                width: 58,
+                                height: 32,
+                                borderRadius: 9,
+                                border: "1px solid #bbb",
+                                textAlign: "center",
+                                fontWeight: 900,
+                                fontSize: 12,
+                              }}
+                              title="Quantité demandée"
+                            />
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          supprimerMoulure(a.id);
-                        }}
-                        disabled={deletingId === a.id}
-                        title="Supprimer"
-                        style={{
-                          minWidth: 82,
-                          height: 34,
-                          borderRadius: 10,
-                          border: "1px solid #d33",
-                          background: deletingId === a.id ? "#ffd6d6" : "#ff5c5c",
-                          color: "#fff",
-                          fontWeight: 800,
-                          fontSize: 12,
-                          cursor: deletingId === a.id ? "default" : "pointer",
-                          padding: "0 10px",
-                        }}
-                      >
-                        {deletingId === a.id ? "..." : "Supprimer"}
-                      </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                retirerMoulureReq(a.id);
+                              }}
+                              title="Retirer"
+                              style={{
+                                height: 32,
+                                borderRadius: 9,
+                                border: "1px solid #d33",
+                                background: "#fff",
+                                color: "#d33",
+                                fontWeight: 900,
+                                fontSize: 12,
+                                cursor: "pointer",
+                                padding: "0 8px",
+                              }}
+                            >
+                              Retirer
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              choisirMoulurePourReq(a.id);
+                            }}
+                            title="Choisir"
+                            style={{
+                              minWidth: 82,
+                              height: 34,
+                              borderRadius: 10,
+                              border: "1px solid #168000",
+                              background: "#168000",
+                              color: "#fff",
+                              fontWeight: 900,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              padding: "0 10px",
+                            }}
+                          >
+                            Choisir
+                          </button>
+                        )
+                      ) : (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEdit(a);
+                            }}
+                            title="Modifier"
+                            style={{
+                              minWidth: 82,
+                              height: 34,
+                              borderRadius: 10,
+                              border: "1px solid #1e5eff",
+                              background: "#1e5eff",
+                              color: "#fff",
+                              fontWeight: 800,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              padding: "0 10px",
+                            }}
+                          >
+                            Modifier
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              supprimerMoulure(a.id);
+                            }}
+                            disabled={deletingId === a.id}
+                            title="Supprimer"
+                            style={{
+                              minWidth: 82,
+                              height: 34,
+                              borderRadius: 10,
+                              border: "1px solid #d33",
+                              background: deletingId === a.id ? "#ffd6d6" : "#ff5c5c",
+                              color: "#fff",
+                              fontWeight: 800,
+                              fontSize: 12,
+                              cursor: deletingId === a.id ? "default" : "pointer",
+                              padding: "0 10px",
+                            }}
+                          >
+                            {deletingId === a.id ? "..." : "Supprimer"}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -629,6 +1202,232 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               background: "transparent",
             }}
           />
+        </div>
+      )}
+
+      {reqConfirmOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeReqConfirm();
+          }}
+        >
+          <div
+            style={{
+              width: "min(900px, 95vw)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+              border: "1px solid rgba(0,0,0,0.08)",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: 16 }}>
+                Confirmer la réquisition
+              </div>
+
+              <button
+                onClick={closeReqConfirm}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: "1px solid #eee",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 18,
+                  fontWeight: 900,
+                }}
+                title="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                  Moulures choisies
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {reqSelectedList.map((it) => (
+                    <div
+                      key={it.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 120px",
+                        gap: 10,
+                        alignItems: "center",
+                        padding: "8px 10px",
+                        borderRadius: 12,
+                        border: "1px solid #eee",
+                        background: "#fff",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            fontWeight: 900,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {it.materiel || "(sans matériel)"}
+                        </div>
+
+                        <div style={{ color: "#666", fontSize: 12 }}>
+                          {it.categorie || ""} • Calibre {it.calibre || ""} • Section{" "}
+                          {it.sectionCour || "—"} • source: {it.projet || ""}
+                        </div>
+                      </div>
+
+                      <input
+                        type="number"
+                        min={1}
+                        value={reqQtyById[it.id] ?? 1}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setReqQtyById((p) => ({
+                            ...p,
+                            [it.id]: Number.isFinite(v) ? v : 1,
+                          }));
+                        }}
+                        style={{
+                          height: 34,
+                          borderRadius: 10,
+                          border: "1px solid #ddd",
+                          padding: "0 10px",
+                          fontWeight: 800,
+                          textAlign: "center",
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                  Projet à envoyer + note
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>Projet à envoyer</div>
+                  <input
+                    value={reqProjetEnvoye}
+                    onChange={(e) => setReqProjetEnvoye(e.target.value)}
+                    placeholder="Ex: Projet ABC / Chantier X"
+                    style={{
+                      height: 36,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+
+                  <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6 }}>Note</div>
+                  <textarea
+                    value={reqNote}
+                    onChange={(e) => setReqNote(e.target.value)}
+                    placeholder="Note (optionnel)"
+                    rows={4}
+                    style={{
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: 10,
+                      fontSize: 13,
+                      resize: "vertical",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {reqError ? (
+                <div
+                  style={{
+                    border: "1px solid #ffd2d2",
+                    background: "#fff5f5",
+                    color: "#c40000",
+                    padding: 10,
+                    borderRadius: 12,
+                    fontWeight: 800,
+                    fontSize: 13,
+                  }}
+                >
+                  {reqError}
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderTop: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <button
+                onClick={closeReqConfirm}
+                disabled={reqSaving}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: reqSaving ? "default" : "pointer",
+                  fontWeight: 900,
+                  opacity: reqSaving ? 0.7 : 1,
+                }}
+              >
+                Retour sélection
+              </button>
+
+              <button
+                onClick={createReq}
+                disabled={reqSaving}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #1e5eff",
+                  background: "#1e5eff",
+                  color: "#fff",
+                  cursor: reqSaving ? "default" : "pointer",
+                  fontWeight: 900,
+                  opacity: reqSaving ? 0.7 : 1,
+                }}
+              >
+                {reqSaving ? "Enregistrement..." : "Créer la réquisition"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1106,383 +1905,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                 >
                   Utiliser ce dessin
                 </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {reqOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            zIndex: 10000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-            boxSizing: "border-box",
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeReq();
-          }}
-        >
-          <div
-            style={{
-              width: "min(900px, 95vw)",
-              maxHeight: "85vh",
-              overflow: "auto",
-              background: "#fff",
-              borderRadius: 16,
-              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
-              border: "1px solid rgba(0,0,0,0.08)",
-            }}
-          >
-            <div
-              style={{
-                padding: "14px 16px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                borderBottom: "1px solid #eee",
-              }}
-            >
-              <div style={{ fontWeight: 900, fontSize: 16 }}>
-                {reqStep === 1
-                  ? "Créer une réquisition — Sélection"
-                  : "Créer une réquisition — Détails"}
-              </div>
-
-              <button
-                onClick={closeReq}
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 10,
-                  border: "1px solid #eee",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: 18,
-                  fontWeight: 900,
-                }}
-                title="Fermer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ padding: 16 }}>
-              {reqStep === 1 ? (
-                <>
-                  <div style={{ fontSize: 13, color: "#444", marginBottom: 10 }}>
-                    Sélectionne une ou plusieurs moulures ici. Sélection:{" "}
-                    <b>{reqSelected.size}</b>
-                  </div>
-
-                  <div
-                    style={{
-                      border: "1px solid #eee",
-                      borderRadius: 12,
-                      overflow: "hidden",
-                      background: "#fff",
-                    }}
-                  >
-                    <div style={{ maxHeight: "45vh", overflow: "auto" }}>
-                      {banque.length === 0 ? (
-                        <div style={{ padding: 12, color: "#777" }}>(Banque vide)</div>
-                      ) : (
-                        banque.map((it) => {
-                          const checked = reqSelected.has(it.id);
-
-                          return (
-                            <div
-                              key={it.id}
-                              onClick={() => toggleReqSelect(it.id)}
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "28px 1fr 120px",
-                                gap: 10,
-                                alignItems: "center",
-                                padding: "10px 12px",
-                                borderBottom: "1px solid #f0f0f0",
-                                cursor: "pointer",
-                                background: checked ? "#eef5ff" : "#fff",
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleReqSelect(it.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                style={{ width: 18, height: 18 }}
-                              />
-
-                              <div style={{ overflow: "hidden" }}>
-                                <div
-                                  style={{
-                                    fontWeight: 900,
-                                    fontSize: 13,
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {it.materiel || "(sans matériel)"}
-                                </div>
-
-                                <div
-                                  style={{
-                                    fontSize: 12,
-                                    color: "#666",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {it.categorie || ""} • Calibre {it.calibre || ""} • Section{" "}
-                                  {it.sectionCour || "—"} • source: {it.projet || ""}
-                                </div>
-                              </div>
-
-                              <div style={{ textAlign: "right", fontWeight: 900, fontSize: 13 }}>
-                                Qté: {it.quantite ?? "—"}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {reqError ? (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        border: "1px solid #ffd2d2",
-                        background: "#fff5f5",
-                        color: "#c40000",
-                        padding: 10,
-                        borderRadius: 12,
-                        fontWeight: 800,
-                        fontSize: 13,
-                      }}
-                    >
-                      {reqError}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-                    <div style={{ fontWeight: 900, marginBottom: 8 }}>Quantités demandées</div>
-
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {reqSelectedList.map((it) => (
-                        <div
-                          key={it.id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 120px",
-                            gap: 10,
-                            alignItems: "center",
-                            padding: "8px 10px",
-                            borderRadius: 12,
-                            border: "1px solid #eee",
-                            background: "#fff",
-                          }}
-                        >
-                          <div style={{ fontSize: 13, overflow: "hidden" }}>
-                            <div
-                              style={{
-                                fontWeight: 900,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {it.materiel || "(sans matériel)"}
-                            </div>
-
-                            <div style={{ color: "#666", fontSize: 12 }}>
-                              {it.categorie || ""} • Calibre {it.calibre || ""} • Section{" "}
-                              {it.sectionCour || "—"} • source: {it.projet || ""}
-                            </div>
-                          </div>
-
-                          <input
-                            type="number"
-                            min={0}
-                            value={reqQtyById[it.id] ?? 1}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              setReqQtyById((p) => ({
-                                ...p,
-                                [it.id]: Number.isFinite(v) ? v : 0,
-                              }));
-                            }}
-                            style={{
-                              height: 34,
-                              borderRadius: 10,
-                              border: "1px solid #ddd",
-                              padding: "0 10px",
-                              fontWeight: 800,
-                              textAlign: "center",
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-                    <div style={{ fontWeight: 900, marginBottom: 8 }}>
-                      Projet à envoyer + note
-                    </div>
-
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <div style={{ fontSize: 13, fontWeight: 800 }}>Projet à envoyer</div>
-                      <input
-                        value={reqProjetEnvoye}
-                        onChange={(e) => setReqProjetEnvoye(e.target.value)}
-                        placeholder="Ex: Projet ABC / Chantier X"
-                        style={{
-                          height: 36,
-                          borderRadius: 10,
-                          border: "1px solid #ddd",
-                          padding: "0 10px",
-                          fontSize: 13,
-                        }}
-                      />
-
-                      <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6 }}>Note</div>
-                      <textarea
-                        value={reqNote}
-                        onChange={(e) => setReqNote(e.target.value)}
-                        placeholder="Note (optionnel)"
-                        rows={4}
-                        style={{
-                          borderRadius: 10,
-                          border: "1px solid #ddd",
-                          padding: 10,
-                          fontSize: 13,
-                          resize: "vertical",
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {reqError ? (
-                    <div
-                      style={{
-                        border: "1px solid #ffd2d2",
-                        background: "#fff5f5",
-                        color: "#c40000",
-                        padding: 10,
-                        borderRadius: 12,
-                        fontWeight: 800,
-                        fontSize: 13,
-                      }}
-                    >
-                      {reqError}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-
-            <div
-              style={{
-                padding: 14,
-                borderTop: "1px solid #eee",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
-              <button
-                onClick={closeReq}
-                style={{
-                  height: 38,
-                  padding: "0 14px",
-                  borderRadius: 12,
-                  border: "1px solid #ddd",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 900,
-                }}
-              >
-                Annuler
-              </button>
-
-              <div style={{ display: "flex", gap: 10 }}>
-                {reqStep === 2 ? (
-                  <button
-                    onClick={() => {
-                      setReqError("");
-                      setReqStep(1);
-                    }}
-                    disabled={reqSaving}
-                    style={{
-                      height: 38,
-                      padding: "0 14px",
-                      borderRadius: 12,
-                      border: "1px solid #ddd",
-                      background: "#fff",
-                      cursor: "pointer",
-                      fontWeight: 900,
-                      opacity: reqSaving ? 0.6 : 1,
-                    }}
-                  >
-                    ← Retour sélection
-                  </button>
-                ) : null}
-
-                {reqStep === 1 ? (
-                  <button
-                    onClick={() => {
-                      if (reqSelected.size === 0) {
-                        setReqError("Sélectionne au moins 1 moulure.");
-                        return;
-                      }
-                      setReqError("");
-                      setReqStep(2);
-                      ensureQtyDefaults();
-                    }}
-                    style={{
-                      height: 38,
-                      padding: "0 14px",
-                      borderRadius: 12,
-                      border: "1px solid #1e5eff",
-                      background: "#1e5eff",
-                      color: "#fff",
-                      cursor: "pointer",
-                      fontWeight: 900,
-                    }}
-                  >
-                    Suivant →
-                  </button>
-                ) : (
-                  <button
-                    onClick={createReq}
-                    disabled={reqSaving}
-                    style={{
-                      height: 38,
-                      padding: "0 14px",
-                      borderRadius: 12,
-                      border: "1px solid #1e5eff",
-                      background: "#1e5eff",
-                      color: "#fff",
-                      cursor: "pointer",
-                      fontWeight: 900,
-                      opacity: reqSaving ? 0.7 : 1,
-                    }}
-                  >
-                    {reqSaving ? "Enregistrement..." : "Créer la réquisition"}
-                  </button>
-                )}
               </div>
             </div>
           </div>

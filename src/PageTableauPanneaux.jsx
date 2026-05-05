@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./pageRetourMateriaux.css";
-import { db } from "./firebaseConfig";
+import { db, auth } from "./firebaseConfig";
 import { CLIENT_ID } from "./appClient";
 import {
   collection,
@@ -10,6 +10,10 @@ import {
   doc,
   deleteDoc,
   updateDoc,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  addDoc,
 } from "firebase/firestore";
 import PanneauxRéglages from "./PanneauxRéglages.jsx";
 import zoneTerrainPanneaux from "./assets/zone-terrain-panneaux.png";
@@ -58,6 +62,67 @@ function lengthFeet(row) {
   if (!Number.isFinite(pieds)) return 0;
   const p = Number.isFinite(pouces) ? pouces : 0;
   return pieds + p / 12;
+}
+
+function currentUserInfo() {
+  const user = auth?.currentUser || null;
+
+  return {
+    uid: user?.uid || "",
+    email: user?.email || "",
+    name: user?.displayName || user?.email || "Utilisateur inconnu",
+  };
+}
+
+function fmtLongueur(pieds, pouces) {
+  const p = pieds === null || pieds === undefined || pieds === "" ? "" : String(pieds);
+  const po =
+    pouces === null || pouces === undefined || pouces === "" ? "0" : String(pouces);
+
+  if (!p) return "";
+  return `${p} pi ${po} po`;
+}
+
+function panneauShortLabel(p) {
+  return [
+    p.type || "Panneau",
+    p.epaisseurPouces ? `${p.epaisseurPouces}"` : "",
+    p.fabricant || "",
+    fmtLongueur(p.longueurPieds, p.longueurPouces),
+    p.largeurPouces ? `x ${p.largeurPouces} po` : "",
+    p.quantite !== undefined && p.quantite !== "" ? `Qté ${p.quantite}` : "",
+    p.sectionCour ? `Section ${p.sectionCour}` : "",
+    p.projet ? `Projet ${p.projet}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function cleanValue(v) {
+  if (v === undefined || v === null) return "";
+  return v;
+}
+
+function sameValue(a, b) {
+  return String(cleanValue(a)).trim() === String(cleanValue(b)).trim();
+}
+
+function buildChanges(before, after, fields) {
+  const changes = {};
+
+  fields.forEach((f) => {
+    const b = cleanValue(before?.[f]);
+    const a = cleanValue(after?.[f]);
+
+    if (!sameValue(b, a)) {
+      changes[f] = {
+        before: b,
+        after: a,
+      };
+    }
+  });
+
+  return changes;
 }
 
 const DEFAULT_SETTINGS = {
@@ -170,12 +235,30 @@ export default function PageTableauPanneaux() {
   const [editingId, setEditingId] = useState(null);
   const [savingEditId, setSavingEditId] = useState(null);
   const [editRow, setEditRow] = useState(null);
+  const [oldRowBeforeEdit, setOldRowBeforeEdit] = useState(null);
+
+  const [checkingId, setCheckingId] = useState(null);
+
+  const [reqMode, setReqMode] = useState(false);
+  const [reqStartOpen, setReqStartOpen] = useState(false);
+  const [reqConfirmOpen, setReqConfirmOpen] = useState(false);
+  const [reqSelected, setReqSelected] = useState(() => new Set());
+  const [reqQtyById, setReqQtyById] = useState({});
+  const [reqProjetEnvoye, setReqProjetEnvoye] = useState("");
+  const [reqNote, setReqNote] = useState("");
+  const [reqSaving, setReqSaving] = useState(false);
+  const [reqError, setReqError] = useState("");
+
+  const [reqNombrePanneaux, setReqNombrePanneaux] = useState("");
+  const [reqLongueurPieds, setReqLongueurPieds] = useState("");
+  const [reqLongueurPouces, setReqLongueurPouces] = useState("");
 
   useEffect(() => {
     const q = query(
       collection(db, "clients", CLIENT_ID, "banquePanneaux"),
       orderBy("createdAt", "desc")
     );
+
     return onSnapshot(
       q,
       (snap) => {
@@ -192,11 +275,13 @@ export default function PageTableauPanneaux() {
 
   useEffect(() => {
     const ref = doc(db, "clients", CLIENT_ID, "reglages", "panneaux");
+
     return onSnapshot(
       ref,
       (snap) => {
         const d = snap.data();
         if (!d) return;
+
         setSettings({
           multipliers: d.multipliers || DEFAULT_SETTINGS.multipliers,
           priceRules: Array.isArray(d.priceRules) ? d.priceRules : [],
@@ -205,6 +290,21 @@ export default function PageTableauPanneaux() {
       (err) => console.error(err)
     );
   }, []);
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === "Escape") {
+        if (reqStartOpen) closeReqStart();
+        if (reqConfirmOpen) closeReqConfirm();
+      }
+    }
+
+    if (reqStartOpen || reqConfirmOpen) {
+      window.addEventListener("keydown", onKeyDown);
+    }
+
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [reqStartOpen, reqConfirmOpen]);
 
   const projets = useMemo(
     () => ["", ...Array.from(new Set(rows.map((r) => r.projet).filter(Boolean))).sort()],
@@ -254,7 +354,28 @@ export default function PageTableauPanneaux() {
   );
 
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
+    const nbRaw = String(reqNombrePanneaux ?? "").trim();
+    const nbDemande = nbRaw === "" ? null : Number(nbRaw);
+
+    const piedsDemande = Number(reqLongueurPieds);
+    const poucesDemandeRaw = String(reqLongueurPouces ?? "").trim();
+    const poucesDemande = poucesDemandeRaw === "" ? 0 : Number(poucesDemandeRaw);
+
+    const reqQtyFilter =
+      reqMode && nbDemande !== null && Number.isFinite(nbDemande) && nbDemande > 0
+        ? nbDemande
+        : null;
+
+    const reqLengthFilter =
+      reqMode &&
+      Number.isFinite(piedsDemande) &&
+      piedsDemande > 0 &&
+      Number.isFinite(poucesDemande) &&
+      poucesDemande >= 0
+        ? piedsDemande + poucesDemande / 12
+        : null;
+
+    const result = rows.filter((r) => {
       if (fProjet && String(r.projet || "") !== fProjet) return false;
       if (fSectionCour && String(r.sectionCour || "") !== fSectionCour) return false;
       if (fType && String(r.type || "") !== fType) return false;
@@ -263,9 +384,50 @@ export default function PageTableauPanneaux() {
       if (fProfile && String(r.profile || "") !== fProfile) return false;
       if (fModele && String(r.modele || "") !== fModele) return false;
       if (fFini && String(r.fini || "") !== fFini) return false;
+
+      if (reqQtyFilter !== null) {
+        const stock = Number(r.quantite ?? 0);
+        if (!Number.isFinite(stock) || stock < reqQtyFilter) return false;
+      }
+
+      if (reqLengthFilter !== null) {
+        const longueur = lengthFeet(r);
+        if (!Number.isFinite(longueur) || longueur < reqLengthFilter) return false;
+      }
+
       return true;
     });
-  }, [rows, fProjet, fSectionCour, fType, fEp, fFab, fProfile, fModele, fFini]);
+
+    if (reqLengthFilter !== null) {
+      return [...result].sort((a, b) => {
+        const la = lengthFeet(a);
+        const lb = lengthFeet(b);
+
+        const diffA = Math.abs(la - reqLengthFilter);
+        const diffB = Math.abs(lb - reqLengthFilter);
+
+        if (diffA !== diffB) return diffA - diffB;
+
+        return la - lb;
+      });
+    }
+
+    return result;
+  }, [
+    rows,
+    fProjet,
+    fSectionCour,
+    fType,
+    fEp,
+    fFab,
+    fProfile,
+    fModele,
+    fFini,
+    reqMode,
+    reqNombrePanneaux,
+    reqLongueurPieds,
+    reqLongueurPouces,
+  ]);
 
   const resumeRows = useMemo(() => {
     return RESUME_GROUPS.map((group) => {
@@ -308,8 +470,14 @@ export default function PageTableauPanneaux() {
     return { hasError, total };
   }, [resumeRows]);
 
+  const reqSelectedList = useMemo(() => {
+    const ids = Array.from(reqSelected);
+    const map = new Map(rows.map((x) => [x.id, x]));
+    return ids.map((id) => map.get(id)).filter(Boolean);
+  }, [reqSelected, rows]);
+
   const cols =
-    "1.2fr 0.75fr 0.8fr 0.75fr 0.45fr 0.9fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.5fr 0.75fr 0.75fr 0.8fr 0.55fr 0.75fr 0.75fr 0.75fr 0.75fr 1fr";
+    "38px 1.2fr 0.75fr 0.8fr 0.75fr 0.45fr 0.9fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.5fr 0.75fr 0.75fr 0.8fr 0.55fr 0.75fr 0.75fr 0.75fr 0.75fr 1fr";
 
   const baseCell = {
     overflow: "hidden",
@@ -342,8 +510,311 @@ export default function PageTableauPanneaux() {
 
   const mult = settings?.multipliers || DEFAULT_SETTINGS.multipliers;
 
+  async function toggleCheckedRow(row) {
+    if (!row?.id) return;
+
+    setCheckingId(row.id);
+
+    try {
+      const actor = currentUserInfo();
+
+      await updateDoc(doc(db, "clients", CLIENT_ID, "banquePanneaux", row.id), {
+        checked: !(row.checked === true),
+        checkedAt: serverTimestamp(),
+        checkedByUid: actor.uid,
+        checkedByEmail: actor.email,
+        checkedByName: actor.name,
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Impossible d'enregistrer le crochet.");
+    } finally {
+      setCheckingId(null);
+    }
+  }
+
+  function startReqMode() {
+    setReqStartOpen(true);
+    setReqMode(false);
+    setReqConfirmOpen(false);
+    setReqSelected(new Set());
+    setReqQtyById({});
+    setReqProjetEnvoye("");
+    setReqNote("");
+    setReqSaving(false);
+    setReqError("");
+    setReqNombrePanneaux("");
+    setReqLongueurPieds("");
+    setReqLongueurPouces("");
+    cancelEdit();
+  }
+
+  function closeReqStart() {
+    setReqStartOpen(false);
+    setReqError("");
+  }
+
+  function confirmerStartReqMode() {
+    const nbRaw = String(reqNombrePanneaux ?? "").trim();
+    const nb = nbRaw === "" ? null : Number(nbRaw);
+
+    const pieds = Number(reqLongueurPieds);
+    const poucesRaw = String(reqLongueurPouces ?? "").trim();
+    const pouces = poucesRaw === "" ? 0 : Number(poucesRaw);
+
+    if (nbRaw !== "" && (!Number.isFinite(nb) || nb <= 0)) {
+      setReqError("Entre un nombre de panneaux valide ou laisse la case vide.");
+      return;
+    }
+
+    if (!Number.isFinite(pieds) || pieds <= 0) {
+      setReqError("Entre une longueur en pieds valide.");
+      return;
+    }
+
+    if (!Number.isFinite(pouces) || pouces < 0 || pouces >= 12) {
+      setReqError("Les pouces doivent être entre 0 et 11.");
+      return;
+    }
+
+    setReqError("");
+    setReqStartOpen(false);
+    setReqMode(true);
+  }
+
+  function cancelReqMode() {
+    setReqMode(false);
+    setReqStartOpen(false);
+    setReqConfirmOpen(false);
+    setReqSelected(new Set());
+    setReqQtyById({});
+    setReqProjetEnvoye("");
+    setReqNote("");
+    setReqSaving(false);
+    setReqError("");
+    setReqNombrePanneaux("");
+    setReqLongueurPieds("");
+    setReqLongueurPouces("");
+  }
+
+  function closeReqConfirm() {
+    setReqConfirmOpen(false);
+    setReqSaving(false);
+    setReqError("");
+  }
+
+  function choisirPanneauPourReq(id) {
+    const nbRaw = String(reqNombrePanneaux ?? "").trim();
+    const nb = nbRaw === "" ? null : Number(nbRaw);
+    const qtyDefault = Number.isFinite(nb) && nb > 0 ? nb : 1;
+
+    setReqSelected((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+
+    setReqQtyById((prev) => ({
+      ...prev,
+      [id]: prev[id] ?? qtyDefault,
+    }));
+  }
+
+  function retirerPanneauReq(id) {
+    setReqSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    setReqQtyById((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function terminerSelectionReq() {
+    if (reqSelected.size === 0) {
+      setReqError("Choisis au moins 1 panneau.");
+      return;
+    }
+
+    setReqError("");
+    setReqConfirmOpen(true);
+  }
+
+  async function createReqPanneaux() {
+    setReqError("");
+
+    if (reqSelected.size === 0) {
+      setReqError("Choisis au moins 1 panneau.");
+      return;
+    }
+
+    if (!String(reqProjetEnvoye || "").trim()) {
+      setReqError("Entre le projet à envoyer.");
+      return;
+    }
+
+    const invalidQty = reqSelectedList.some((it) => {
+      const q = Number(reqQtyById[it.id]);
+      return !Number.isFinite(q) || q <= 0;
+    });
+
+    if (invalidQty) {
+      setReqError("Toutes les quantités doivent être plus grandes que 0.");
+      return;
+    }
+
+    setReqSaving(true);
+
+    try {
+      const actor = currentUserInfo();
+      const counterRef = doc(db, "clients", CLIENT_ID, "_counters", "reqPanneaux");
+
+      const { reqId, reqNum } = await runTransaction(db, async (tx) => {
+        const counterSnap = await tx.get(counterRef);
+        const next = counterSnap.exists() ? Number(counterSnap.data()?.next ?? 1) : 1;
+        const reqNum = Number.isFinite(next) && next > 0 ? next : 1;
+        const reqId = `reqpan${reqNum}`;
+
+        const itemRefs = reqSelectedList.map((it) => ({
+          item: it,
+          ref: doc(db, "clients", CLIENT_ID, "banquePanneaux", it.id),
+          qtyDemandee: Number(reqQtyById[it.id] ?? 1) || 1,
+        }));
+
+        const itemSnaps = [];
+
+        for (const x of itemRefs) {
+          const snap = await tx.get(x.ref);
+          itemSnaps.push({ ...x, snap });
+        }
+
+        for (const x of itemSnaps) {
+          if (!x.snap.exists()) {
+            throw new Error(`Le panneau ${x.item.id} n'existe plus.`);
+          }
+
+          const data = x.snap.data();
+          const stockActuel = Number(data.quantite ?? 0);
+
+          if (!Number.isFinite(stockActuel)) {
+            throw new Error(`Quantité invalide pour le panneau ${x.item.id}.`);
+          }
+
+          if (x.qtyDemandee > stockActuel) {
+            throw new Error(
+              `Quantité insuffisante pour ${data.type || "panneau"} ${
+                data.epaisseurPouces || ""
+              }". Stock: ${stockActuel}, demandé: ${x.qtyDemandee}.`
+            );
+          }
+        }
+
+        const items = itemSnaps.map((x) => {
+          const data = x.snap.data();
+
+          return {
+            banqueId: x.item.id,
+            projetSource: data.projet || "",
+            sectionCour: data.sectionCour || "",
+            date: data.date || "",
+            type: data.type || "",
+            epaisseurPouces: data.epaisseurPouces || "",
+            fabricant: data.fabricant || "",
+            profile: data.profile || "",
+            modele: data.modele || "",
+            fini: data.fini || "",
+            longueurPieds: data.longueurPieds ?? "",
+            longueurPouces: data.longueurPouces ?? "",
+            largeurPouces: data.largeurPouces ?? "",
+            faceExterieure: data.faceExterieure || "",
+            faceInterieure: data.faceInterieure || "",
+            quantiteStockAvant: Number(data.quantite ?? 0) || 0,
+            quantiteStockApres: (Number(data.quantite ?? 0) || 0) - x.qtyDemandee,
+            quantiteDemande: x.qtyDemandee,
+          };
+        });
+
+        const reqRef = doc(db, "clients", CLIENT_ID, "requisitionsPanneaux", reqId);
+        const histRef = doc(collection(db, "clients", CLIENT_ID, "historique"));
+
+        tx.set(counterRef, { next: reqNum + 1 }, { merge: true });
+
+        tx.set(reqRef, {
+          reqId,
+          reqNum,
+          type: "panneaux",
+          status: "demande",
+          projetEnvoye: String(reqProjetEnvoye || "").trim(),
+          note: String(reqNote || "").trim(),
+          items,
+
+          createdByUid: actor.uid,
+          createdByEmail: actor.email,
+          createdByName: actor.name,
+          updatedByUid: actor.uid,
+          updatedByEmail: actor.email,
+          updatedByName: actor.name,
+
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.set(histRef, {
+          action: "requisition_panneaux_creation",
+          titre: "Réquisition panneaux créée",
+          module: "requisitions",
+          cibleId: reqId,
+          cibleType: "requisitionsPanneaux",
+          description: `Réquisition ${reqId} créée avec ${items.length} ligne(s)`,
+          reqId,
+          items,
+
+          createdByUid: actor.uid,
+          createdByEmail: actor.email,
+          createdByName: actor.name,
+          userEmail: actor.email,
+          userName: actor.name,
+
+          createdAt: serverTimestamp(),
+        });
+
+        for (const x of itemSnaps) {
+          const data = x.snap.data();
+          const stockActuel = Number(data.quantite ?? 0);
+          const nouveauStock = stockActuel - x.qtyDemandee;
+
+          tx.update(x.ref, {
+            quantite: nouveauStock,
+            updatedByUid: actor.uid,
+            updatedByEmail: actor.email,
+            updatedByName: actor.name,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        return { reqId, reqNum };
+      });
+
+      cancelReqMode();
+      alert(`Réquisition créée: ${reqId}`);
+    } catch (e) {
+      console.error(e);
+      setReqError(e?.message || "Erreur lors de la création de la réquisition.");
+    } finally {
+      setReqSaving(false);
+    }
+  }
+
   function startEdit(r) {
+    if (reqMode) return;
+
     setEditingId(r.id);
+    setOldRowBeforeEdit({ ...r });
+
     setEditRow({
       projet: r.projet || "",
       sectionCour: r.sectionCour || "",
@@ -366,6 +837,7 @@ export default function PageTableauPanneaux() {
   function cancelEdit() {
     setEditingId(null);
     setEditRow(null);
+    setOldRowBeforeEdit(null);
   }
 
   function onEditChange(field, value) {
@@ -374,6 +846,8 @@ export default function PageTableauPanneaux() {
 
   async function saveEdit(rowId) {
     if (!editRow) return;
+
+    const oldRow = oldRowBeforeEdit || rows.find((r) => r.id === rowId) || {};
 
     const projet = String(editRow.projet || "").trim();
     if (!projet) return alert("Projet obligatoire.");
@@ -388,6 +862,7 @@ export default function PageTableauPanneaux() {
 
     const longPoucesStr = String(editRow.longueurPouces ?? "").trim();
     const longPoucesNum = longPoucesStr === "" ? 0 : Number(longPoucesStr);
+
     if (Number.isNaN(longPoucesNum) || longPoucesNum < 0 || longPoucesNum >= 12) {
       return alert("Longueur pouces doit être entre 0 et 11.");
     }
@@ -400,28 +875,94 @@ export default function PageTableauPanneaux() {
       return alert("Quantité doit être > 0.");
     }
 
+    const newData = {
+      projet,
+      sectionCour: String(editRow.sectionCour || "").trim(),
+      date: String(editRow.date || "").trim(),
+      type: String(editRow.type || "").trim(),
+      epaisseurPouces: String(editRow.epaisseurPouces || "").trim(),
+      fabricant: String(editRow.fabricant || "").trim(),
+      profile: String(editRow.profile || "").trim(),
+      modele: String(editRow.modele || "").trim(),
+      fini: String(editRow.fini || "").trim(),
+      longueurPieds: Number(editRow.longueurPieds),
+      longueurPouces: longPoucesNum,
+      largeurPouces: Number(editRow.largeurPouces),
+      quantite: Number(editRow.quantite),
+      faceExterieure: String(editRow.faceExterieure || "").trim(),
+      faceInterieure: String(editRow.faceInterieure || "").trim(),
+    };
+
+    const compareFields = [
+      "projet",
+      "sectionCour",
+      "date",
+      "type",
+      "epaisseurPouces",
+      "fabricant",
+      "profile",
+      "modele",
+      "fini",
+      "longueurPieds",
+      "longueurPouces",
+      "largeurPouces",
+      "quantite",
+      "faceExterieure",
+      "faceInterieure",
+    ];
+
+    const afterForCompare = {
+      ...oldRow,
+      ...newData,
+    };
+
+    const changes = buildChanges(oldRow, afterForCompare, compareFields);
+
+    if (Object.keys(changes).length === 0) {
+      cancelEdit();
+      return;
+    }
+
     setSavingEditId(rowId);
+
     try {
+      const actor = currentUserInfo();
+
       await updateDoc(doc(db, "clients", CLIENT_ID, "banquePanneaux", rowId), {
-        projet,
-        sectionCour: String(editRow.sectionCour || "").trim(),
-        date: String(editRow.date || "").trim(),
-        type: String(editRow.type || "").trim(),
-        epaisseurPouces: String(editRow.epaisseurPouces || "").trim(),
-        fabricant: String(editRow.fabricant || "").trim(),
-        profile: String(editRow.profile || "").trim(),
-        modele: String(editRow.modele || "").trim(),
-        fini: String(editRow.fini || "").trim(),
-        longueurPieds: Number(editRow.longueurPieds),
-        longueurPouces: longPoucesNum,
-        largeurPouces: Number(editRow.largeurPouces),
-        quantite: Number(editRow.quantite),
-        faceExterieure: String(editRow.faceExterieure || "").trim(),
-        faceInterieure: String(editRow.faceInterieure || "").trim(),
+        ...newData,
+        updatedByUid: actor.uid,
+        updatedByEmail: actor.email,
+        updatedByName: actor.name,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, "clients", CLIENT_ID, "historique"), {
+        action: "panneau_modification",
+        titre: "Panneau modifié",
+        module: "panneaux",
+        cibleId: rowId,
+        cibleType: "banquePanneaux",
+        description: `Panneau modifié : ${panneauShortLabel(afterForCompare)}`,
+
+        before: oldRow,
+        after: afterForCompare,
+        changes,
+
+        updatedByUid: actor.uid,
+        updatedByEmail: actor.email,
+        updatedByName: actor.name,
+        createdByUid: actor.uid,
+        createdByEmail: actor.email,
+        createdByName: actor.name,
+        userEmail: actor.email,
+        userName: actor.name,
+
+        createdAt: serverTimestamp(),
       });
 
       setEditingId(null);
       setEditRow(null);
+      setOldRowBeforeEdit(null);
     } catch (e) {
       console.error(e);
       alert("❌ Modification impossible: " + (e?.message || String(e)));
@@ -436,6 +977,7 @@ export default function PageTableauPanneaux() {
     if (!ok) return;
 
     setDeletingId(rowId);
+
     try {
       await deleteDoc(doc(db, "clients", CLIENT_ID, "banquePanneaux", rowId));
     } catch (e) {
@@ -447,19 +989,58 @@ export default function PageTableauPanneaux() {
   }
 
   return (
-    <div className="pageRM pageRM--full">
+    <div
+      className="pageRM pageRM--full"
+      style={{
+        background: reqMode ? "#d9dde5" : undefined,
+        transition: "background 0.2s ease",
+      }}
+    >
       {showSettings && <PanneauxRéglages onClose={() => setShowSettings(false)} />}
 
-      <div className="titleRow titleRow--full" style={{ paddingTop: 12 }}>
+      <div
+        className="titleRow titleRow--full"
+        style={{
+          paddingTop: 12,
+          position: "relative",
+          zIndex: reqMode ? 50 : undefined,
+        }}
+      >
+        <style>
+          {`
+            @keyframes pulseTerminerSelection {
+              0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 rgba(22, 128, 0, 0.0);
+                opacity: 1;
+              }
+              50% {
+                transform: scale(1.035);
+                box-shadow: 0 0 22px rgba(22, 128, 0, 0.45);
+                opacity: 0.88;
+              }
+              100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 rgba(22, 128, 0, 0.0);
+                opacity: 1;
+              }
+            }
+          `}
+        </style>
+
         <div />
+
         <div
           className="bigTitle"
           style={{
             display: "flex",
-            gap: 12,
+            gap: 18,
             justifyContent: "center",
             alignItems: "center",
+            width: "100%",
             flexWrap: "wrap",
+            position: "relative",
+            zIndex: reqMode ? 50 : undefined,
           }}
         >
           <img
@@ -476,38 +1057,169 @@ export default function PageTableauPanneaux() {
             }}
           />
 
-          <span>Inventaire panneaux</span>
-
-          <button
-            className="btn"
-            style={{ width: 140, height: 34 }}
-            onClick={() => setShowSettings(true)}
-          >
-            Réglages
-          </button>
-
-          <PanneauxExcelButton
-            rows={filtered}
-            prixUnitaire={prixUnitaire}
-            settings={settings}
-          />
-
-          <button
-            className="btn"
+          <div
             style={{
-              width: 140,
-              height: 34,
-              background: showResume ? "#d9e8ff" : "#e6e6e6",
-              border: "1px solid #9a9a9a",
-              fontWeight: 800,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 14,
+              minWidth: 0,
+              position: "relative",
+              zIndex: reqMode ? 50 : undefined,
             }}
-            onClick={() => setShowResume((v) => !v)}
           >
-            {showResume ? "Fermer résumé" : "Résumé"}
-          </button>
+            <div
+              style={{
+                fontSize: 34,
+                fontWeight: 900,
+                textAlign: "center",
+                lineHeight: 1.1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Inventaire panneaux
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                justifyContent: "center",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                className="btn"
+                style={{ width: 140, height: 34 }}
+                onClick={() => setShowSettings(true)}
+              >
+                Réglages
+              </button>
+
+              <PanneauxExcelButton
+                rows={filtered}
+                prixUnitaire={prixUnitaire}
+                settings={settings}
+              />
+
+              <button
+                className="btn"
+                style={{
+                  width: 140,
+                  height: 34,
+                  background: showResume ? "#d9e8ff" : "#e6e6e6",
+                  border: "1px solid #9a9a9a",
+                  fontWeight: 800,
+                }}
+                onClick={() => setShowResume((v) => !v)}
+              >
+                {showResume ? "Fermer résumé" : "Résumé"}
+              </button>
+
+              {!reqMode ? (
+                <button
+                  className="btn"
+                  style={{
+                    width: 210,
+                    minWidth: 210,
+                    height: 34,
+                    background: "#1e5eff",
+                    color: "#fff",
+                    border: "1px solid #1e5eff",
+                    fontWeight: 900,
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
+                  onClick={startReqMode}
+                >
+                  + Créer réquisition
+                </button>
+              ) : (
+                <button
+                  className="btn"
+                  style={{
+                    width: 110,
+                    minWidth: 110,
+                    height: 34,
+                    background: "#fff",
+                    color: "#d33",
+                    border: "1px solid #d33",
+                    fontWeight: 900,
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
+                  onClick={cancelReqMode}
+                >
+                  Annuler
+                </button>
+              )}
+            </div>
+
+            {reqMode ? (
+              <button
+                className="btn"
+                style={{
+                  marginTop: 6,
+                  width: 360,
+                  maxWidth: "90vw",
+                  minHeight: 54,
+                  background: "#168000",
+                  color: "#fff",
+                  border: "2px solid #0f6500",
+                  borderRadius: 14,
+                  fontWeight: 1000,
+                  fontSize: 22,
+                  whiteSpace: "nowrap",
+                  cursor: "pointer",
+                  animation: "pulseTerminerSelection 1.8s ease-in-out infinite",
+                  position: "relative",
+                  zIndex: 80,
+                  boxShadow: "0 0 22px rgba(22,128,0,0.45)",
+                }}
+                onClick={terminerSelectionReq}
+              >
+                Terminer la sélection ({reqSelected.size})
+              </button>
+            ) : null}
+          </div>
         </div>
+
         <div />
       </div>
+
+      {reqMode ? (
+        <div
+          style={{
+            margin: "0 auto 10px auto",
+            width: "min(1600px, calc(100vw - 24px))",
+            border: "1px solid #f1c40f",
+            background: "#fff8d8",
+            color: "#4d3b00",
+            padding: "10px 12px",
+            borderRadius: 12,
+            fontWeight: 900,
+            fontSize: 13,
+            boxSizing: "border-box",
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>
+            Mode réquisition actif : le tableau montre seulement les panneaux avec au moins{" "}
+            <b>{reqNombrePanneaux || "?"}</b> en stock et une longueur minimum de{" "}
+            <b>
+              {reqLongueurPieds || "?"} pi {reqLongueurPouces || 0} po
+            </b>
+            . Clique sur <b>Choisir</b>, puis sur <b>Terminer la sélection</b>.
+          </span>
+
+          {reqError ? <span style={{ color: "#c40000" }}>{reqError}</span> : null}
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -696,10 +1408,22 @@ export default function PageTableauPanneaux() {
                 fontSize: 18,
               }}
             >
-              <div style={{ padding: "4px 8px", borderRight: "2px solid #000", textAlign: "center" }}>
+              <div
+                style={{
+                  padding: "4px 8px",
+                  borderRight: "2px solid #000",
+                  textAlign: "center",
+                }}
+              >
                 Type
               </div>
-              <div style={{ padding: "4px 8px", borderRight: "2px solid #000", textAlign: "center" }}>
+              <div
+                style={{
+                  padding: "4px 8px",
+                  borderRight: "2px solid #000",
+                  textAlign: "center",
+                }}
+              >
                 Épaisseur
               </div>
               <div style={{ padding: "4px 8px", textAlign: "center" }}>
@@ -792,12 +1516,28 @@ export default function PageTableauPanneaux() {
         </div>
       )}
 
-      <div className="tableZone tableZone--center" style={{ paddingTop: 0 }}>
+      <div
+        className="tableZone tableZone--center"
+        style={{
+          paddingTop: 0,
+          paddingLeft: reqMode ? 12 : undefined,
+          paddingRight: reqMode ? 12 : undefined,
+          boxSizing: "border-box",
+        }}
+      >
         <div
           className="tableBox tableBox--wide"
           style={{
             height: "calc(100vh - 220px)",
             overflow: "hidden",
+            border: reqMode ? "3px solid #1e5eff" : undefined,
+            boxShadow: reqMode
+              ? "0 0 0 9999px rgba(0,0,0,0.25), 0 18px 40px rgba(0,0,0,0.25)"
+              : undefined,
+            borderRadius: reqMode ? 14 : undefined,
+            background: "#fff",
+            position: "relative",
+            zIndex: reqMode ? 2 : undefined,
           }}
         >
           <div
@@ -827,6 +1567,7 @@ export default function PageTableauPanneaux() {
               }}
             >
               {[
+                "✓",
                 "Projet",
                 "Section cour",
                 "Date",
@@ -847,10 +1588,10 @@ export default function PageTableauPanneaux() {
                 "Vente min.",
                 "Sug. sans",
                 "Sug. avec",
-                "Actions",
+                reqMode ? "Choisir" : "Actions",
               ].map((h, idx, arr) => (
                 <div
-                  key={h}
+                  key={`${h}-${idx}`}
                   style={{
                     ...(idx === arr.length - 1 ? lastCell : baseCell),
                     fontWeight: 800,
@@ -870,10 +1611,17 @@ export default function PageTableauPanneaux() {
             {loading ? (
               <div style={{ padding: 12 }}>Chargement...</div>
             ) : filtered.length === 0 ? (
-              <div style={{ padding: 12 }}>(Aucune donnée)</div>
+              <div style={{ padding: 12 }}>
+                {reqMode
+                  ? "(Aucun panneau ne correspond au nombre et à la longueur demandés)"
+                  : "(Aucune donnée)"}
+              </div>
             ) : (
               filtered.map((r, i) => {
                 const isEditing = editingId === r.id;
+                const chosen = reqSelected.has(r.id);
+                const checked = r.checked === true;
+                const reqQty = reqQtyById[r.id] ?? 1;
 
                 const rowForCalc = isEditing
                   ? {
@@ -898,7 +1646,13 @@ export default function PageTableauPanneaux() {
                     ? `${rowForCalc.longueurPieds},${String(rowForCalc.longueurPouces ?? 0)}`
                     : "";
 
-                const rowBg = i % 2 === 1 ? "#f4f4f4" : "#fff";
+                const rowBg = chosen
+                  ? "#e9ffe6"
+                  : checked
+                  ? "#fff3a6"
+                  : i % 2 === 1
+                  ? "#f4f4f4"
+                  : "#fff";
 
                 return (
                   <div
@@ -914,6 +1668,29 @@ export default function PageTableauPanneaux() {
                       background: rowBg,
                     }}
                   >
+                    <div
+                      style={{
+                        ...baseCell,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={checkingId === r.id}
+                        onChange={() => toggleCheckedRow(r)}
+                        title="Marquer cette ligne"
+                        style={{
+                          width: 16,
+                          height: 16,
+                          cursor: checkingId === r.id ? "default" : "pointer",
+                        }}
+                      />
+                    </div>
+
                     <div style={{ ...baseCell, fontWeight: 800 }}>
                       {isEditing ? (
                         <input
@@ -926,7 +1703,14 @@ export default function PageTableauPanneaux() {
                       )}
                     </div>
 
-                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div
+                      style={{
+                        ...baseCell,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
                       {isEditing ? (
                         <select
                           style={inputMini}
@@ -975,7 +1759,14 @@ export default function PageTableauPanneaux() {
                       )}
                     </div>
 
-                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div
+                      style={{
+                        ...baseCell,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
                       {isEditing ? (
                         <select
                           style={inputMini}
@@ -1064,7 +1855,14 @@ export default function PageTableauPanneaux() {
                       )}
                     </div>
 
-                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div
+                      style={{
+                        ...baseCell,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
                       {isEditing ? (
                         <input
                           style={inputMini}
@@ -1077,7 +1875,15 @@ export default function PageTableauPanneaux() {
                       )}
                     </div>
 
-                    <div style={{ ...baseCell, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>
+                    <div
+                      style={{
+                        ...baseCell,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 800,
+                      }}
+                    >
                       {isEditing ? (
                         <input
                           style={inputMini}
@@ -1198,7 +2004,71 @@ export default function PageTableauPanneaux() {
                         flexWrap: "wrap",
                       }}
                     >
-                      {isEditing ? (
+                      {reqMode ? (
+                        chosen ? (
+                          <>
+                            <input
+                              type="number"
+                              min={1}
+                              value={reqQty}
+                              onChange={(e) => {
+                                const v = Number(e.target.value);
+                                setReqQtyById((prev) => ({
+                                  ...prev,
+                                  [r.id]: Number.isFinite(v) ? v : 1,
+                                }));
+                              }}
+                              style={{
+                                width: 42,
+                                height: 22,
+                                fontSize: 10,
+                                padding: 0,
+                                textAlign: "center",
+                                fontWeight: 900,
+                                border: "1px solid #888",
+                                borderRadius: 4,
+                              }}
+                              title="Quantité demandée"
+                            />
+
+                            <button
+                              className="btn"
+                              style={{
+                                width: 52,
+                                height: 22,
+                                fontSize: 10,
+                                padding: 0,
+                                border: "1px solid #d33",
+                                background: "#fff",
+                                color: "#d33",
+                                fontWeight: 900,
+                              }}
+                              onClick={() => retirerPanneauReq(r.id)}
+                              title="Retirer"
+                            >
+                              Retirer
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="btn"
+                            style={{
+                              width: 62,
+                              height: 22,
+                              fontSize: 10,
+                              padding: 0,
+                              border: "1px solid #168000",
+                              background: "#168000",
+                              color: "#fff",
+                              fontWeight: 900,
+                            }}
+                            onClick={() => choisirPanneauPourReq(r.id)}
+                            title="Choisir"
+                          >
+                            Choisir
+                          </button>
+                        )
+                      ) : isEditing ? (
                         <>
                           <button
                             className="btn"
@@ -1281,6 +2151,446 @@ export default function PageTableauPanneaux() {
           </div>
         </div>
       </div>
+
+      {reqStartOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeReqStart();
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 95vw)",
+              background: "#fff",
+              borderRadius: 16,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+              border: "1px solid rgba(0,0,0,0.08)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: 16 }}>
+                Nouvelle réquisition panneaux
+              </div>
+
+              <button
+                onClick={closeReqStart}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: "1px solid #eee",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 18,
+                  fontWeight: 900,
+                }}
+                title="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: 16, display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 900 }}>
+                  Nombre de panneaux voulu
+                </div>
+
+                <input
+                  type="number"
+                  min={1}
+                  value={reqNombrePanneaux}
+                  onChange={(e) => setReqNombrePanneaux(e.target.value)}
+                  placeholder="Optionnel"
+                  style={{
+                    height: 40,
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    padding: "0 10px",
+                    fontSize: 14,
+                    fontWeight: 800,
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 900 }}>
+                  Longueur minimum voulue
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 4 }}>
+                      Pieds
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      value={reqLongueurPieds}
+                      onChange={(e) => setReqLongueurPieds(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: 40,
+                        borderRadius: 10,
+                        border: "1px solid #ddd",
+                        padding: "0 10px",
+                        fontSize: 14,
+                        fontWeight: 800,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 4 }}>
+                      Pouces
+                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={11}
+                      value={reqLongueurPouces}
+                      onChange={(e) => setReqLongueurPouces(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: 40,
+                        borderRadius: 10,
+                        border: "1px solid #ddd",
+                        padding: "0 10px",
+                        fontSize: 14,
+                        fontWeight: 800,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {reqError ? (
+                <div
+                  style={{
+                    border: "1px solid #ffd2d2",
+                    background: "#fff5f5",
+                    color: "#c40000",
+                    padding: 10,
+                    borderRadius: 12,
+                    fontWeight: 800,
+                    fontSize: 13,
+                  }}
+                >
+                  {reqError}
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderTop: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <button
+                onClick={closeReqStart}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                }}
+              >
+                Annuler
+              </button>
+
+              <button
+                onClick={confirmerStartReqMode}
+                style={{
+                  height: 38,
+                  padding: "0 16px",
+                  borderRadius: 12,
+                  border: "1px solid #1e5eff",
+                  background: "#1e5eff",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                }}
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reqConfirmOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeReqConfirm();
+          }}
+        >
+          <div
+            style={{
+              width: "min(1000px, 95vw)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+              border: "1px solid rgba(0,0,0,0.08)",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: 16 }}>
+                Confirmer la réquisition panneaux
+              </div>
+
+              <button
+                onClick={closeReqConfirm}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: "1px solid #eee",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 18,
+                  fontWeight: 900,
+                }}
+                title="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                  Panneaux choisis
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {reqSelectedList.map((it) => {
+                    const longTxt =
+                      it.longueurPieds != null && it.longueurPieds !== ""
+                        ? `${it.longueurPieds},${String(it.longueurPouces ?? 0)}`
+                        : "";
+
+                    return (
+                      <div
+                        key={it.id}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 120px",
+                          gap: 10,
+                          alignItems: "center",
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid #eee",
+                          background: "#fff",
+                        }}
+                      >
+                        <div style={{ fontSize: 13, overflow: "hidden" }}>
+                          <div
+                            style={{
+                              fontWeight: 900,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {it.type || "(sans type)"} — {it.epaisseurPouces || ""}" —{" "}
+                            {it.fabricant || ""}
+                          </div>
+
+                          <div style={{ color: "#666", fontSize: 12 }}>
+                            Projet source: {it.projet || ""} • Section {it.sectionCour || "—"} •{" "}
+                            {longTxt} x {it.largeurPouces || ""} • Stock: {it.quantite ?? ""}
+                          </div>
+
+                          <div style={{ color: "#666", fontSize: 12 }}>
+                            Profile: {it.profile || "—"} • Modèle: {it.modele || "—"} • Fini:{" "}
+                            {it.fini || "—"}
+                          </div>
+                        </div>
+
+                        <input
+                          type="number"
+                          min={1}
+                          value={reqQtyById[it.id] ?? 1}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            setReqQtyById((p) => ({
+                              ...p,
+                              [it.id]: Number.isFinite(v) ? v : 1,
+                            }));
+                          }}
+                          style={{
+                            height: 34,
+                            borderRadius: 10,
+                            border: "1px solid #ddd",
+                            padding: "0 10px",
+                            fontWeight: 800,
+                            textAlign: "center",
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                  Projet à envoyer + note
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>Projet à envoyer</div>
+                  <input
+                    value={reqProjetEnvoye}
+                    onChange={(e) => setReqProjetEnvoye(e.target.value)}
+                    style={{
+                      height: 36,
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: "0 10px",
+                      fontSize: 13,
+                    }}
+                  />
+
+                  <div style={{ fontSize: 13, fontWeight: 800, marginTop: 6 }}>Note</div>
+                  <textarea
+                    value={reqNote}
+                    onChange={(e) => setReqNote(e.target.value)}
+                    placeholder="Note (optionnel)"
+                    rows={4}
+                    style={{
+                      borderRadius: 10,
+                      border: "1px solid #ddd",
+                      padding: 10,
+                      fontSize: 13,
+                      resize: "vertical",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {reqError ? (
+                <div
+                  style={{
+                    border: "1px solid #ffd2d2",
+                    background: "#fff5f5",
+                    color: "#c40000",
+                    padding: 10,
+                    borderRadius: 12,
+                    fontWeight: 800,
+                    fontSize: 13,
+                  }}
+                >
+                  {reqError}
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                borderTop: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <button
+                onClick={closeReqConfirm}
+                disabled={reqSaving}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: reqSaving ? "default" : "pointer",
+                  fontWeight: 900,
+                  opacity: reqSaving ? 0.7 : 1,
+                }}
+              >
+                Retour sélection
+              </button>
+
+              <button
+                onClick={createReqPanneaux}
+                disabled={reqSaving}
+                style={{
+                  height: 38,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #1e5eff",
+                  background: "#1e5eff",
+                  color: "#fff",
+                  cursor: reqSaving ? "default" : "pointer",
+                  fontWeight: 900,
+                  opacity: reqSaving ? 0.7 : 1,
+                }}
+              >
+                {reqSaving ? "Enregistrement..." : "Créer la réquisition"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
