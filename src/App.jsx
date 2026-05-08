@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "./firebaseConfig";
+import {
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
+import { auth, db } from "./firebaseConfig";
 
 import Login from "./Login.jsx";
 import PageRetourMateriaux from "./PageRetourMateriaux.jsx";
@@ -8,15 +16,78 @@ import PageTableauMoulure from "./PageTableauMoulure.jsx";
 import PageTableauPanneaux from "./PageTableauPanneaux.jsx";
 import Requisition from "./Requisition.jsx";
 import Historique from "./Historique.jsx";
+import Reglage from "./Reglage.jsx";
 
 export default function App() {
-  const [route, setRoute] = useState("ajout"); // ajout | moulures | panneaux | requisition | historique
+  const [route, setRoute] = useState("ajout");
   const [user, setUser] = useState(undefined); // undefined = loading
+  const [userProfile, setUserProfile] = useState(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u || null);
+      setUserProfile(null);
+
+      if (u) {
+        await ensureUserProfile(u);
+      }
+    });
+
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const ref = doc(db, "users", user.uid);
+
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          setUserProfile({
+            id: snap.id,
+            ...snap.data(),
+          });
+        } else {
+          setUserProfile(null);
+        }
+      },
+      (e) => {
+        console.error("Erreur lecture profil utilisateur:", e);
+        setUserProfile(null);
+      }
+    );
+
+    return () => unsub();
+  }, [user]);
+
+  async function ensureUserProfile(u) {
+    const ref = doc(db, "users", u.uid);
+    const snap = await getDoc(ref);
+
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        uid: u.uid,
+        email: u.email || "",
+        emailLower: (u.email || "").toLowerCase(),
+        displayName: u.displayName || "",
+        isAdmin: true,
+        role: "admin",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+      });
+      return;
+    }
+
+    await updateDoc(ref, {
+      email: u.email || "",
+      emailLower: (u.email || "").toLowerCase(),
+      displayName: u.displayName || "",
+      lastLoginAt: serverTimestamp(),
+    });
+  }
 
   if (user === undefined) {
     return (
@@ -29,6 +100,17 @@ export default function App() {
   if (user === null) {
     return <Login />;
   }
+
+  // IMPORTANT:
+  // Si le champ isAdmin n'existe pas encore, on considère admin par défaut.
+  // Donc tout le monde est admin au début, puis tu peux en enlever dans Réglages.
+  const isAdmin = userProfile?.isAdmin !== false;
+
+  const allowedRoutes = isAdmin
+    ? ["ajout", "moulures", "panneaux", "requisition", "historique", "reglage"]
+    : ["ajout", "requisition"];
+
+  const safeRoute = allowedRoutes.includes(route) ? route : "ajout";
 
   const tabBtn = (active) => ({
     height: 38,
@@ -103,6 +185,28 @@ export default function App() {
 
           <div style={{ textAlign: "center", fontWeight: 600, fontSize: 11 }}>
             Connecté: <span style={{ fontWeight: 500 }}>{connectedLabel}</span>
+
+            {isAdmin ? (
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontWeight: 900,
+                  color: "#0a7a28",
+                }}
+              >
+                ADMIN
+              </span>
+            ) : (
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontWeight: 900,
+                  color: "#a00000",
+                }}
+              >
+                NON-ADMIN
+              </span>
+            )}
           </div>
 
           <div style={{ justifySelf: "end" }}>
@@ -133,37 +237,55 @@ export default function App() {
           flexShrink: 0,
         }}
       >
-        <button style={tabBtn(route === "ajout")} onClick={() => setRoute("ajout")}>
+        <button
+          style={tabBtn(safeRoute === "ajout")}
+          onClick={() => setRoute("ajout")}
+        >
           Ajout
         </button>
 
-        <button
-          style={tabBtn(route === "moulures")}
-          onClick={() => setRoute("moulures")}
-        >
-          Tableau moulures
-        </button>
+        {isAdmin && (
+          <>
+            <button
+              style={tabBtn(safeRoute === "moulures")}
+              onClick={() => setRoute("moulures")}
+            >
+              Tableau moulures
+            </button>
+
+            <button
+              style={tabBtn(safeRoute === "panneaux")}
+              onClick={() => setRoute("panneaux")}
+            >
+              Tableau panneaux
+            </button>
+          </>
+        )}
 
         <button
-          style={tabBtn(route === "panneaux")}
-          onClick={() => setRoute("panneaux")}
-        >
-          Tableau panneaux
-        </button>
-
-        <button
-          style={tabBtn(route === "requisition")}
+          style={tabBtn(safeRoute === "requisition")}
           onClick={() => setRoute("requisition")}
         >
           Réquisition
         </button>
 
-        <button
-          style={tabBtn(route === "historique")}
-          onClick={() => setRoute("historique")}
-        >
-          Historique
-        </button>
+        {isAdmin && (
+          <>
+            <button
+              style={tabBtn(safeRoute === "historique")}
+              onClick={() => setRoute("historique")}
+            >
+              Historique
+            </button>
+
+            <button
+              style={tabBtn(safeRoute === "reglage")}
+              onClick={() => setRoute("reglage")}
+            >
+              Réglages
+            </button>
+          </>
+        )}
       </div>
 
       {/* CONTENU */}
@@ -175,17 +297,19 @@ export default function App() {
           overflowX: "hidden",
         }}
       >
-        {route === "moulures" ? (
+        {safeRoute === "moulures" && isAdmin ? (
           <PageTableauMoulure
             onRetour={() => setRoute("ajout")}
             onGoRequisition={() => setRoute("requisition")}
           />
-        ) : route === "panneaux" ? (
+        ) : safeRoute === "panneaux" && isAdmin ? (
           <PageTableauPanneaux onRetour={() => setRoute("ajout")} />
-        ) : route === "requisition" ? (
-          <Requisition onRetour={() => setRoute("ajout")} />
-        ) : route === "historique" ? (
+        ) : safeRoute === "requisition" ? (
+          <Requisition onRetour={() => setRoute("ajout")} isAdmin={isAdmin} />
+        ) : safeRoute === "historique" && isAdmin ? (
           <Historique onRetour={() => setRoute("ajout")} />
+        ) : safeRoute === "reglage" && isAdmin ? (
+          <Reglage currentUser={user} onRetour={() => setRoute("ajout")} />
         ) : (
           <PageRetourMateriaux />
         )}
