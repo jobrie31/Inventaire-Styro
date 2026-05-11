@@ -251,6 +251,7 @@ export default function PageTableauPanneaux() {
   const [reqStartOpen, setReqStartOpen] = useState(false);
   const [reqConfirmOpen, setReqConfirmOpen] = useState(false);
   const [reqSelected, setReqSelected] = useState(() => new Set());
+  const [reqConfirmed, setReqConfirmed] = useState(() => new Set());
   const [reqQtyById, setReqQtyById] = useState({});
   const [reqProjetEnvoye, setReqProjetEnvoye] = useState("");
   const [reqNote, setReqNote] = useState("");
@@ -400,23 +401,11 @@ export default function PageTableauPanneaux() {
   }
 
   const optimisationRows = useMemo(() => {
-    if (!reqLongueurVoulue || !reqFabricant) return [];
+    if (!reqLongueurVoulue) return [];
 
     return rows
       .filter((r) => {
-        if (fabAliasLower(r.fabricant) !== fabAliasLower(reqFabricant)) return false;
-
-        if (reqType && String(r.type || "") !== String(reqType)) return false;
-
-        if (
-          reqEpaisseur &&
-          String(r.epaisseurPouces || "") !== String(reqEpaisseur)
-        ) {
-          return false;
-        }
-
         if (morceauxPossibles(r) <= 0) return false;
-
         return Number(r.quantite ?? 0) > 0;
       })
       .map((r) => ({
@@ -425,17 +414,13 @@ export default function PageTableauPanneaux() {
         perte: perteOptimisation(r),
       }))
       .sort((a, b) => {
-        if (a.perte !== b.perte) {
-          return a.perte - b.perte;
-        }
-
+        if (a.perte !== b.perte) return a.perte - b.perte;
         if (b.morceauxPossible !== a.morceauxPossible) {
           return b.morceauxPossible - a.morceauxPossible;
         }
-
         return lengthFeet(a) - lengthFeet(b);
       });
-  }, [rows, reqLongueurVoulue, reqFabricant, reqType, reqEpaisseur]);
+  }, [rows, reqLongueurVoulue]);
 
   const filtered = useMemo(() => {
     const result = rows.filter((r) => {
@@ -462,25 +447,6 @@ export default function PageTableauPanneaux() {
 
       if (reqMode) {
         if (!reqLongueurVoulue) return false;
-
-        if (
-          reqFabricant &&
-          fabAliasLower(r.fabricant) !== fabAliasLower(reqFabricant)
-        ) {
-          return false;
-        }
-
-        if (reqType && String(r.type || "") !== String(reqType)) {
-          return false;
-        }
-
-        if (
-          reqEpaisseur &&
-          String(r.epaisseurPouces || "") !== String(reqEpaisseur)
-        ) {
-          return false;
-        }
-
         if (morceauxPossibles(r) <= 0) return false;
         if (Number(r.quantite ?? 0) <= 0) return false;
       }
@@ -516,9 +482,6 @@ export default function PageTableauPanneaux() {
     fModele,
     fFini,
     reqMode,
-    reqFabricant,
-    reqType,
-    reqEpaisseur,
     reqLongueurVoulue,
   ]);
 
@@ -569,11 +532,13 @@ export default function PageTableauPanneaux() {
     return ids.map((id) => map.get(id)).filter(Boolean);
   }, [reqSelected, rows]);
 
-  const colsAvecPrix =
-    "38px 1.2fr 0.75fr 0.8fr 0.75fr 0.45fr 0.9fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.5fr 0.75fr 0.75fr 0.8fr 0.55fr 0.75fr 0.75fr 0.75fr 0.75fr 1fr";
+  const colsAvecPrix = reqMode
+    ? "38px 1.2fr 0.75fr 0.8fr 0.75fr 0.45fr 0.9fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.5fr 0.75fr 0.75fr 0.9fr 0.75fr 0.9fr 0.8fr 0.55fr 0.75fr 0.75fr 0.75fr 0.75fr 1fr"
+    : "38px 1.2fr 0.75fr 0.8fr 0.75fr 0.45fr 0.9fr 0.8fr 0.8fr 0.8fr 0.7fr 0.6fr 0.5fr 0.75fr 0.75fr 0.8fr 0.55fr 0.75fr 0.75fr 0.75fr 0.75fr 1fr";
 
-  const colsSansPrix =
-    "38px 1.3fr 0.8fr 0.85fr 0.8fr 0.5fr 1fr 0.9fr 0.9fr 0.9fr 0.8fr 0.7fr 0.55fr 0.9fr 0.9fr 1fr";
+  const colsSansPrix = reqMode
+    ? "38px 1.3fr 0.8fr 0.85fr 0.8fr 0.5fr 1fr 0.9fr 0.9fr 0.9fr 0.8fr 0.7fr 0.55fr 0.9fr 0.9fr 0.9fr 0.75fr 0.9fr 1fr"
+    : "38px 1.3fr 0.8fr 0.85fr 0.8fr 0.5fr 1fr 0.9fr 0.9fr 0.9fr 0.8fr 0.7fr 0.55fr 0.9fr 0.9fr 1fr";
 
   const cols = showPrix ? colsAvecPrix : colsSansPrix;
 
@@ -625,6 +590,7 @@ export default function PageTableauPanneaux() {
     setReqMode(false);
     setReqConfirmOpen(false);
     setReqSelected(new Set());
+    setReqConfirmed(new Set());
     setReqQtyById({});
     setReqProjetEnvoye("");
     setReqNote("");
@@ -648,11 +614,6 @@ export default function PageTableauPanneaux() {
     const poucesRaw = String(reqLongueurPouces ?? "").trim();
     const pouces = poucesRaw === "" ? 0 : Number(poucesRaw);
 
-    if (!String(reqFabricant || "").trim()) {
-      setReqError("Choisis un fabricant.");
-      return;
-    }
-
     if (!Number.isFinite(pieds) || pieds <= 0) {
       setReqError("Entre une longueur en pieds valide.");
       return;
@@ -673,6 +634,7 @@ export default function PageTableauPanneaux() {
     setReqStartOpen(false);
     setReqConfirmOpen(false);
     setReqSelected(new Set());
+    setReqConfirmed(new Set());
     setReqQtyById({});
     setReqProjetEnvoye("");
     setReqNote("");
@@ -698,10 +660,59 @@ export default function PageTableauPanneaux() {
       return next;
     });
 
+    setReqConfirmed((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
     setReqQtyById((prev) => ({
       ...prev,
       [id]: prev[id] ?? 1,
     }));
+
+    setReqError("");
+  }
+
+  function setReqQtyPanneau(id, rawValue) {
+    const v = Number(rawValue);
+
+    setReqQtyById((prev) => ({
+      ...prev,
+      [id]: rawValue === "" ? "" : Number.isFinite(v) ? v : 1,
+    }));
+
+    setReqConfirmed((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    setReqError("");
+  }
+
+  function confirmerPanneauReq(id) {
+    const row = rows.find((x) => x.id === id);
+    const qty = Number(reqQtyById[id] ?? 1);
+    const stock = Number(row?.quantite ?? 0);
+
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setReqError("Entre une quantité plus grande que 0 avant de confirmer.");
+      return;
+    }
+
+    if (Number.isFinite(stock) && qty > stock) {
+      setReqError(`Quantité insuffisante. Stock disponible: ${stock}.`);
+      return;
+    }
+
+    setReqConfirmed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+
+    setReqError("");
   }
 
   function choisirMeilleurPanneau() {
@@ -713,6 +724,7 @@ export default function PageTableauPanneaux() {
     }
 
     setReqSelected(new Set([best.id]));
+    setReqConfirmed(new Set());
     setReqQtyById({ [best.id]: 1 });
     setReqError("");
     setReqStartOpen(false);
@@ -721,6 +733,12 @@ export default function PageTableauPanneaux() {
 
   function retirerPanneauReq(id) {
     setReqSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    setReqConfirmed((prev) => {
       const next = new Set(prev);
       next.delete(id);
       return next;
@@ -739,20 +757,12 @@ export default function PageTableauPanneaux() {
       return;
     }
 
-    setReqError("");
-    setReqConfirmOpen(true);
-  }
+    const notConfirmed = Array.from(reqSelected).filter(
+      (id) => !reqConfirmed.has(id)
+    );
 
-  async function createReqPanneaux() {
-    setReqError("");
-
-    if (reqSelected.size === 0) {
-      setReqError("Choisis au moins 1 panneau.");
-      return;
-    }
-
-    if (!String(reqProjetEnvoye || "").trim()) {
-      setReqError("Entre le projet à envoyer.");
+    if (notConfirmed.length > 0) {
+      setReqError("Confirme chaque panneau choisi avant de terminer la sélection.");
       return;
     }
 
@@ -766,13 +776,49 @@ export default function PageTableauPanneaux() {
       return;
     }
 
+    setReqError("");
+    setReqConfirmOpen(true);
+  }
+
+  async function createReqPanneaux() {
+    setReqError("");
+
+    if (reqSelected.size === 0) {
+      setReqError("Choisis au moins 1 panneau.");
+      return false;
+    }
+
+    const notConfirmed = Array.from(reqSelected).filter(
+      (id) => !reqConfirmed.has(id)
+    );
+
+    if (notConfirmed.length > 0) {
+      setReqError("Confirme chaque panneau choisi avant de créer la réquisition.");
+      return false;
+    }
+
+    if (!String(reqProjetEnvoye || "").trim()) {
+      setReqError("Entre le projet à envoyer.");
+      return false;
+    }
+
+    const invalidQty = reqSelectedList.some((it) => {
+      const q = Number(reqQtyById[it.id]);
+      return !Number.isFinite(q) || q <= 0;
+    });
+
+    if (invalidQty) {
+      setReqError("Toutes les quantités doivent être plus grandes que 0.");
+      return false;
+    }
+
     setReqSaving(true);
 
     try {
       const actor = currentUserInfo();
       const counterRef = doc(db, "clients", CLIENT_ID, "_counters", "reqPanneaux");
 
-      const { reqId } = await runTransaction(db, async (tx) => {
+      const { reqId, reqNum } = await runTransaction(db, async (tx) => {
         const counterSnap = await tx.get(counterRef);
         const next = counterSnap.exists() ? Number(counterSnap.data()?.next ?? 1) : 1;
         const reqNum = Number.isFinite(next) && next > 0 ? next : 1;
@@ -823,6 +869,7 @@ export default function PageTableauPanneaux() {
             reqLongueurVoulue && possible > 0
               ? rowLength - possible * reqLongueurVoulue
               : null;
+          const qteStockAvant = Number(data.quantite ?? 0) || 0;
 
           return {
             banqueId: x.item.id,
@@ -840,16 +887,18 @@ export default function PageTableauPanneaux() {
             largeurPouces: data.largeurPouces ?? "",
             faceExterieure: data.faceExterieure || "",
             faceInterieure: data.faceInterieure || "",
-            quantiteStockAvant: Number(data.quantite ?? 0) || 0,
-            quantiteStockApres: (Number(data.quantite ?? 0) || 0) - x.qtyDemandee,
+            quantiteStockAvant: qteStockAvant,
+            quantiteStockApres: qteStockAvant - x.qtyDemandee,
             quantiteDemande: x.qtyDemandee,
 
             optimisationLongueurDemandee: reqLongueurVoulue || null,
             optimisationMorceauxPossibles: possible,
+            optimisationQuantiteTotalePossible: qteStockAvant * possible,
             optimisationPertePieds: perte,
-            optimisationFabricantDemande: reqFabricant || "",
-            optimisationTypeDemande: reqType || "",
-            optimisationEpaisseurDemande: reqEpaisseur || "",
+            optimisationPerteParPanneauPieds: perte,
+            optimisationFabricantDemande: "",
+            optimisationTypeDemande: "",
+            optimisationEpaisseurDemande: "",
           };
         });
 
@@ -867,10 +916,13 @@ export default function PageTableauPanneaux() {
           note: String(reqNote || "").trim(),
           items,
 
+          courrielOuvert: true,
+          courrielDestinataire: "entrepot@styro.ca",
+
           optimisation: {
-            fabricant: reqFabricant || "",
-            type: reqType || "",
-            epaisseur: reqEpaisseur || "",
+            fabricant: "",
+            type: "",
+            epaisseur: "",
             longueurPieds: reqLongueurPieds || "",
             longueurPouces: reqLongueurPouces || "",
             longueurTotalePieds: reqLongueurVoulue || null,
@@ -896,6 +948,8 @@ export default function PageTableauPanneaux() {
           description: `Réquisition ${reqId} créée avec ${items.length} ligne(s)`,
           reqId,
           items,
+          courrielOuvert: true,
+          courrielDestinataire: "entrepot@styro.ca",
 
           createdByUid: actor.uid,
           createdByEmail: actor.email,
@@ -924,10 +978,15 @@ export default function PageTableauPanneaux() {
       });
 
       cancelReqMode();
-      alert(`Réquisition créée: ${reqId}`);
+
+      return {
+        reqId,
+        reqNum,
+      };
     } catch (e) {
       console.error(e);
       setReqError(e?.message || "Erreur lors de la création de la réquisition.");
+      return false;
     } finally {
       setReqSaving(false);
     }
@@ -1125,6 +1184,7 @@ export default function PageTableauPanneaux() {
     loading,
     filtered,
     reqSelected,
+    reqConfirmed,
     reqQtyById,
     settings,
     mult,
@@ -1144,6 +1204,8 @@ export default function PageTableauPanneaux() {
     eps,
     fabs,
     setReqQtyById,
+    setReqQtyPanneau,
+    confirmerPanneauReq,
     retirerPanneauReq,
     choisirPanneauPourReq,
     choisirMeilleurPanneau,
@@ -1210,31 +1272,9 @@ export default function PageTableauPanneaux() {
         style={{
           paddingTop: 12,
           position: "relative",
-          zIndex: reqMode ? 50 : undefined,
+          zIndex: reqMode ? 120 : undefined,
         }}
       >
-        <style>
-          {`
-            @keyframes pulseTerminerSelection {
-              0% {
-                transform: scale(1);
-                box-shadow: 0 0 0 rgba(22, 128, 0, 0.0);
-                opacity: 1;
-              }
-              50% {
-                transform: scale(1.035);
-                box-shadow: 0 0 22px rgba(22, 128, 0, 0.45);
-                opacity: 0.88;
-              }
-              100% {
-                transform: scale(1);
-                box-shadow: 0 0 0 rgba(22, 128, 0, 0.0);
-                opacity: 1;
-              }
-            }
-          `}
-        </style>
-
         <div />
 
         <div
@@ -1247,7 +1287,7 @@ export default function PageTableauPanneaux() {
             width: "100%",
             flexWrap: "wrap",
             position: "relative",
-            zIndex: reqMode ? 50 : undefined,
+            zIndex: reqMode ? 120 : undefined,
           }}
         >
           <img
@@ -1273,7 +1313,7 @@ export default function PageTableauPanneaux() {
               gap: 14,
               minWidth: 0,
               position: "relative",
-              zIndex: reqMode ? 50 : undefined,
+              zIndex: reqMode ? 120 : undefined,
             }}
           >
             <div
@@ -1357,7 +1397,7 @@ export default function PageTableauPanneaux() {
                   }}
                   onClick={startReqMode}
                 >
-                  + Optimiser réquisition
+                  + Réquisition
                 </button>
               ) : (
                 <button
@@ -1384,26 +1424,27 @@ export default function PageTableauPanneaux() {
               <button
                 className="btn"
                 style={{
-                  marginTop: 6,
-                  width: 360,
-                  maxWidth: "90vw",
-                  minHeight: 54,
-                  background: "#168000",
-                  color: "#fff",
-                  border: "2px solid #0f6500",
-                  borderRadius: 14,
+                  marginTop: 10,
+                  width: 500,
+                  maxWidth: "94vw",
+                  minHeight: 68,
+                  background: "#00a51f",
+                  color: "#ffffff",
+                  border: "3px solid #006d14",
+                  borderRadius: 18,
                   fontWeight: 1000,
-                  fontSize: 22,
+                  fontSize: 28,
+                  letterSpacing: "0.2px",
                   whiteSpace: "nowrap",
                   cursor: "pointer",
-                  animation: "pulseTerminerSelection 1.8s ease-in-out infinite",
                   position: "relative",
-                  zIndex: 80,
-                  boxShadow: "0 0 22px rgba(22,128,0,0.45)",
+                  zIndex: 160,
+                  boxShadow: "0 8px 18px rgba(0,0,0,0.28)",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.25)",
                 }}
                 onClick={terminerSelectionReq}
               >
-                Terminer la sélection ({reqSelected.size})
+                ✅ Terminer la sélection ({reqConfirmed.size}/{reqSelected.size})
               </button>
             ) : null}
           </div>
@@ -1416,43 +1457,56 @@ export default function PageTableauPanneaux() {
         <div
           style={{
             margin: "0 auto 10px auto",
-            width: "min(1600px, calc(100vw - 24px))",
-            border: "1px solid #f1c40f",
+            width: "fit-content",
+            maxWidth: "calc(100vw - 24px)",
+            border: "2px solid #facc15",
             background: "#fff8d8",
             color: "#4d3b00",
-            padding: "10px 12px",
+            padding: "8px 18px",
             borderRadius: 12,
             fontWeight: 900,
             fontSize: 13,
             boxSizing: "border-box",
             display: "flex",
-            justifyContent: "space-between",
-            gap: 10,
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 8,
             flexWrap: "wrap",
+            position: "relative",
+            zIndex: 140,
+            boxShadow: "0 0 16px rgba(250, 204, 21, 0.55)",
           }}
         >
-          <span>
-            Mode optimisation actif : fabricant <b>{reqFabricant || "?"}</b>
-            {reqType ? (
-              <>
-                {" "}
-                — type <b>{reqType}</b>
-              </>
-            ) : null}
-            {reqEpaisseur ? (
-              <>
-                {" "}
-                — épaisseur <b>{reqEpaisseur}"</b>
-              </>
-            ) : null}
-            , longueur voulue{" "}
-            <b>
-              {reqLongueurPieds || "?"} pi {reqLongueurPouces || 0} po
-            </b>
-            . Le tableau montre les panneaux compatibles et les trie par moins de perte.
+          <span style={{ fontSize: 14, fontWeight: 900 }}>
+            Longueur voulue :
           </span>
 
-          {reqError ? <span style={{ color: "#c40000" }}>{reqError}</span> : null}
+          <span
+            style={{
+              fontSize: 22,
+              fontWeight: 1000,
+              color: "#0b3a78",
+              background: "#ffffff",
+              border: "1px solid #facc15",
+              borderRadius: 10,
+              padding: "4px 12px",
+              lineHeight: 1,
+            }}
+          >
+            {reqLongueurPieds || "?"} pi {reqLongueurPouces || 0} po
+          </span>
+
+          {reqError ? (
+            <span
+              style={{
+                color: "#c40000",
+                fontWeight: 1000,
+                marginLeft: 8,
+              }}
+            >
+              {reqError}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -1462,6 +1516,11 @@ export default function PageTableauPanneaux() {
           display: "flex",
           justifyContent: "center",
           padding: "0 14px 10px 14px",
+          position: "relative",
+          zIndex: reqMode ? 140 : undefined,
+          filter: reqMode
+            ? "drop-shadow(0 0 14px rgba(255,255,255,0.9))"
+            : undefined,
         }}
       >
         <div
@@ -1470,6 +1529,13 @@ export default function PageTableauPanneaux() {
             display: "grid",
             gridTemplateColumns: "repeat(8, minmax(0, 1fr))",
             gap: 10,
+            background: reqMode ? "rgba(255,255,255,0.96)" : undefined,
+            padding: reqMode ? 10 : undefined,
+            borderRadius: reqMode ? 14 : undefined,
+            border: reqMode ? "2px solid rgba(255,255,255,0.9)" : undefined,
+            boxShadow: reqMode
+              ? "0 0 28px rgba(255,255,255,0.95), 0 8px 22px rgba(0,0,0,0.18)"
+              : undefined,
           }}
         >
           <div>

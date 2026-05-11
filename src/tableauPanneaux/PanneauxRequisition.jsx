@@ -4,26 +4,13 @@ export default function PanneauxRequisition({ ctx }) {
   const {
     reqStartOpen,
     closeReqStart,
-    fabs,
-    types,
-    eps,
-    reqFabricant,
-    setReqFabricant,
-    reqType,
-    setReqType,
-    reqEpaisseur,
-    setReqEpaisseur,
+
     reqLongueurPieds,
     setReqLongueurPieds,
     reqLongueurPouces,
     setReqLongueurPouces,
-    reqLongueurVoulue,
     reqError,
     confirmerStartReqMode,
-    optimisationRows,
-    choisirMeilleurPanneau,
-    morceauxPossibles,
-    perteOptimisation,
 
     reqConfirmOpen,
     closeReqConfirm,
@@ -36,6 +23,9 @@ export default function PanneauxRequisition({ ctx }) {
     setReqQtyById,
     reqSaving,
     createReqPanneaux,
+
+    morceauxPossibles,
+    perteOptimisation,
   } = ctx;
 
   function fmtLongueur(row) {
@@ -57,6 +47,45 @@ export default function PanneauxRequisition({ ctx }) {
     if (pouces <= 0) return `${pieds} pi`;
 
     return `${pieds} pi ${pouces} po`;
+  }
+
+  function openOutlookRequisitionPanneauxEmail({ reqId }) {
+    const to = "entrepot@styro.ca";
+
+    const subject = encodeURIComponent(
+      `Réquisition panneaux ${reqId || ""}`.trim()
+    );
+
+    const body = encodeURIComponent(
+      `Salut les gars,
+
+J'ai envoyé une réquisition de panneaux dans l'inventaire Styro.
+
+Merci de bien aller traiter la demande.
+
+Numéro de réquisition : ${reqId || "-"}
+Projet à envoyer : ${String(reqProjetEnvoye || "").trim() || "-"}
+
+${String(reqNote || "").trim() ? `Note :\n${String(reqNote || "").trim()}\n\n` : ""}Merci.`
+    );
+
+    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+  }
+
+  async function handleCreateReqPanneauxAvecEmail() {
+    try {
+      const result = await createReqPanneaux();
+
+      if (!result || result === false) {
+        return;
+      }
+
+      openOutlookRequisitionPanneauxEmail({
+        reqId: result.reqId,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   const inputStyle = {
@@ -98,13 +127,12 @@ export default function PanneauxRequisition({ ctx }) {
         >
           <div
             style={{
-              width: "min(1120px, 96vw)",
-              maxHeight: "88vh",
-              overflow: "auto",
+              width: "min(520px, 95vw)",
               background: "#fff",
               borderRadius: 18,
               boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
               border: "1px solid rgba(0,0,0,0.08)",
+              overflow: "hidden",
             }}
           >
             <div
@@ -117,8 +145,8 @@ export default function PanneauxRequisition({ ctx }) {
                 background: "#f8fbff",
               }}
             >
-              <div style={{ fontWeight: 1000, fontSize: 22 }}>
-                Optimisation réquisition panneaux
+              <div style={{ fontWeight: 1000, fontSize: 21 }}>
+                Réquisition panneaux
               </div>
 
               <button
@@ -142,60 +170,30 @@ export default function PanneauxRequisition({ ctx }) {
             <div style={{ padding: 18, display: "grid", gap: 16 }}>
               <div
                 style={{
+                  border: "1px solid #dbeafe",
+                  background: "#f8fbff",
+                  borderRadius: 14,
+                  padding: 12,
+                  color: "#0b3a78",
+                  fontWeight: 900,
+                  fontSize: 14,
+                  lineHeight: 1.35,
+                  textAlign: "center",
+                }}
+              >
+                Entre seulement la longueur voulue. Après, le tableau affichera
+                les panneaux compatibles. Tu pourras utiliser les filtres déjà
+                existants pour choisir le fabricant, type, épaisseur, etc.
+              </div>
+
+              <div
+                style={{
                   display: "grid",
-                  gridTemplateColumns: "1.15fr 1fr 0.75fr 1fr 0.75fr",
+                  gridTemplateColumns: "1fr 0.75fr",
                   gap: 12,
                   alignItems: "end",
                 }}
               >
-                <div>
-                  <div style={labelStyle}>Fabricant</div>
-                  <select
-                    value={reqFabricant}
-                    onChange={(e) => setReqFabricant(e.target.value)}
-                    style={inputStyle}
-                  >
-                    <option value=""></option>
-                    {(fabs || []).filter(Boolean).map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div style={labelStyle}>Type</div>
-                  <select
-                    value={reqType}
-                    onChange={(e) => setReqType(e.target.value)}
-                    style={inputStyle}
-                  >
-                    <option value=""></option>
-                    {(types || []).filter(Boolean).map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div style={labelStyle}>Épaisseur</div>
-                  <select
-                    value={reqEpaisseur}
-                    onChange={(e) => setReqEpaisseur(e.target.value)}
-                    style={inputStyle}
-                  >
-                    <option value=""></option>
-                    {(eps || []).filter(Boolean).map((epp) => (
-                      <option key={epp} value={epp}>
-                        {epp}"
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
                 <div>
                   <div style={labelStyle}>Longueur voulue - pieds</div>
                   <input
@@ -238,133 +236,6 @@ export default function PanneauxRequisition({ ctx }) {
                   {reqError}
                 </div>
               ) : null}
-
-              <div
-                style={{
-                  border: "2px solid #c7d8f5",
-                  borderRadius: 16,
-                  overflow: "hidden",
-                  background: "#f8fbff",
-                }}
-              >
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    background: "#0b3a78",
-                    color: "#fff",
-                    fontSize: 18,
-                    fontWeight: 1000,
-                    textAlign: "center",
-                  }}
-                >
-                  Meilleurs panneaux compatibles ({optimisationRows.length})
-                </div>
-
-                {!reqFabricant || !reqLongueurVoulue ? (
-                  <div
-                    style={{
-                      padding: 18,
-                      textAlign: "center",
-                      fontWeight: 900,
-                      color: "#555",
-                    }}
-                  >
-                    Choisis un fabricant et une longueur pour voir l’optimisation.
-                  </div>
-                ) : optimisationRows.length === 0 ? (
-                  <div
-                    style={{
-                      padding: 18,
-                      textAlign: "center",
-                      fontWeight: 900,
-                      color: "#c40000",
-                    }}
-                  >
-                    Aucun panneau compatible trouvé.
-                  </div>
-                ) : (
-                  <>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 0.9fr 0.75fr 1fr 0.8fr 0.8fr 0.8fr",
-                        background: "#e8eef7",
-                        borderBottom: "1px solid #c7d8f5",
-                        fontWeight: 1000,
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ padding: 10 }}>Fabricant</div>
-                      <div style={{ padding: 10 }}>Type</div>
-                      <div style={{ padding: 10 }}>Ép.</div>
-                      <div style={{ padding: 10 }}>Longueur</div>
-                      <div style={{ padding: 10 }}>Quantité</div>
-                      <div style={{ padding: 10 }}>Possible</div>
-                      <div style={{ padding: 10 }}>Perte</div>
-                    </div>
-
-                    {optimisationRows.slice(0, 20).map((r, idx) => {
-                      const possible = morceauxPossibles(r);
-                      const perte = perteOptimisation(r);
-
-                      return (
-                        <div
-                          key={r.id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns:
-                              "1fr 0.9fr 0.75fr 1fr 0.8fr 0.8fr 0.8fr",
-                            background:
-                              idx === 0
-                                ? "#d9fbe3"
-                                : idx % 2
-                                ? "#f1f4f8"
-                                : "#fff",
-                            borderBottom: "1px solid #d9e2ef",
-                            textAlign: "center",
-                            alignItems: "center",
-                            fontWeight: idx === 0 ? 1000 : 800,
-                          }}
-                        >
-                          <div style={{ padding: 10 }}>{r.fabricant || "—"}</div>
-
-                          <div style={{ padding: 10 }}>{r.type || "—"}</div>
-
-                          <div style={{ padding: 10 }}>
-                            {r.epaisseurPouces ? `${r.epaisseurPouces}"` : "—"}
-                          </div>
-
-                          <div style={{ padding: 10 }}>{fmtLongueur(r)}</div>
-
-                          <div
-                            style={{
-                              padding: 10,
-                              color: "#064f17",
-                              fontSize: 18,
-                              fontWeight: 1000,
-                            }}
-                          >
-                            {r.quantite ?? "—"}
-                          </div>
-
-                          <div
-                            style={{
-                              padding: 10,
-                              color: "#168000",
-                              fontSize: 18,
-                              fontWeight: 1000,
-                            }}
-                          >
-                            x{possible}
-                          </div>
-
-                          <div style={{ padding: 10 }}>{fmtPerte(perte)}</div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
             </div>
 
             <div
@@ -375,7 +246,6 @@ export default function PanneauxRequisition({ ctx }) {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 10,
-                flexWrap: "wrap",
               }}
             >
               <button
@@ -393,39 +263,21 @@ export default function PanneauxRequisition({ ctx }) {
                 Annuler
               </button>
 
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button
-                  onClick={choisirMeilleurPanneau}
-                  style={{
-                    height: 42,
-                    padding: "0 18px",
-                    borderRadius: 12,
-                    border: "1px solid #168000",
-                    background: "#168000",
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontWeight: 1000,
-                  }}
-                >
-                  Choisir le meilleur automatiquement
-                </button>
-
-                <button
-                  onClick={confirmerStartReqMode}
-                  style={{
-                    height: 42,
-                    padding: "0 18px",
-                    borderRadius: 12,
-                    border: "1px solid #1e5eff",
-                    background: "#1e5eff",
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontWeight: 1000,
-                  }}
-                >
-                  Voir dans le tableau
-                </button>
-              </div>
+              <button
+                onClick={confirmerStartReqMode}
+                style={{
+                  height: 42,
+                  padding: "0 18px",
+                  borderRadius: 12,
+                  border: "1px solid #1e5eff",
+                  background: "#1e5eff",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 1000,
+                }}
+              >
+                Voir dans le tableau
+              </button>
             </div>
           </div>
         </div>
@@ -617,7 +469,7 @@ export default function PanneauxRequisition({ ctx }) {
               </button>
 
               <button
-                onClick={createReqPanneaux}
+                onClick={handleCreateReqPanneauxAvecEmail}
                 disabled={reqSaving}
                 style={{
                   height: 40,

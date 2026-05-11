@@ -10,6 +10,7 @@ export default function PanneauxTable({ ctx }) {
     loading,
     filtered,
     reqSelected,
+    reqConfirmed,
     reqQtyById,
     settings,
     mult,
@@ -28,6 +29,8 @@ export default function PanneauxTable({ ctx }) {
     types,
     eps,
     setReqQtyById,
+    setReqQtyPanneau,
+    confirmerPanneauReq,
     retirerPanneauReq,
     choisirPanneauPourReq,
     saveEdit,
@@ -36,6 +39,7 @@ export default function PanneauxTable({ ctx }) {
     startEdit,
     supprimerRow,
     deletingId,
+    reqSaving,
     reqLongueurVoulue,
     morceauxPossibles,
     perteOptimisation,
@@ -106,6 +110,47 @@ export default function PanneauxTable({ ctx }) {
     borderRight: "1px solid #bfc5ce",
   };
 
+  const optCellStyle = {
+    ...baseCell,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: 1000,
+    borderRight: "1px solid #bfc5ce",
+    background: "#fed7aa",
+    color: "#7c2d12",
+  };
+
+  const qtnTotalCellStyle = {
+    ...baseCell,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    fontSize: 17,
+    fontWeight: 1000,
+    borderRight: "1px solid #bfc5ce",
+    background: "#39ff14",
+    color: "#003b00",
+    animation: "flashQtnTotal 1.05s ease-in-out infinite",
+    boxShadow: "inset 0 0 14px rgba(0, 255, 0, 0.55)",
+  };
+
+  const pertePanneauCellStyle = {
+    ...baseCell,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: 1000,
+    borderRight: "1px solid #bfc5ce",
+    background: "#fff7ed",
+    color: "#9a3412",
+  };
+
   const tableHeaders = [
     "✓",
     "Projet",
@@ -122,10 +167,11 @@ export default function PanneauxTable({ ctx }) {
     "Qté",
     "Face ext.",
     "Face int.",
+    ...(reqMode ? ["Optimisation", "Qtn total", "Perte / panneau"] : []),
     ...(showPrix
       ? ["Prix unit.", "PC", "Valeur", "Vente min.", "Sug. sans", "Sug. avec"]
       : []),
-    reqMode ? "Optimisation" : "Actions",
+    reqMode ? "Action" : "Actions",
   ];
 
   function formatPerte(v) {
@@ -142,6 +188,19 @@ export default function PanneauxTable({ ctx }) {
     return `${pieds} pi ${pouces} po`;
   }
 
+  function changeReqQty(id, value) {
+    if (typeof setReqQtyPanneau === "function") {
+      setReqQtyPanneau(id, value);
+      return;
+    }
+
+    const v = Number(value);
+    setReqQtyById((prev) => ({
+      ...prev,
+      [id]: value === "" ? "" : Number.isFinite(v) ? v : 1,
+    }));
+  }
+
   return (
     <div
       className="tableZone tableZone--center"
@@ -152,6 +211,39 @@ export default function PanneauxTable({ ctx }) {
         boxSizing: "border-box",
       }}
     >
+      <style>
+        {`
+          @keyframes flashQtnTotal {
+            0% {
+              background: #39ff14;
+              transform: scale(1);
+              box-shadow: inset 0 0 8px rgba(0, 255, 0, 0.35), 0 0 0 rgba(57, 255, 20, 0);
+            }
+            50% {
+              background: #b6ff00;
+              transform: scale(1.04);
+              box-shadow: inset 0 0 20px rgba(0, 255, 0, 0.75), 0 0 16px rgba(57, 255, 20, 0.75);
+            }
+            100% {
+              background: #39ff14;
+              transform: scale(1);
+              box-shadow: inset 0 0 8px rgba(0, 255, 0, 0.35), 0 0 0 rgba(57, 255, 20, 0);
+            }
+          }
+
+          .noNumberArrows::-webkit-outer-spin-button,
+          .noNumberArrows::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+          }
+
+          .noNumberArrows {
+            -moz-appearance: textfield;
+            appearance: textfield;
+          }
+        `}
+      </style>
+
       <div
         className="tableBox tableBox--wide"
         style={{
@@ -245,8 +337,13 @@ export default function PanneauxTable({ ctx }) {
             filtered.map((r, i) => {
               const isEditing = editingId === r.id;
               const chosen = reqSelected.has(r.id);
+              const confirmed = reqConfirmed?.has?.(r.id) === true;
               const checked = r.checked === true;
               const reqQty = reqQtyById[r.id] ?? 1;
+              const stock = Number(r.quantite ?? 0);
+              const reqQtyNumber = Number(reqQty);
+              const qtyInvalid = !Number.isFinite(reqQtyNumber) || reqQtyNumber <= 0;
+              const qtyTooHigh = Number.isFinite(stock) && reqQtyNumber > stock;
 
               const rowForCalc = isEditing
                 ? {
@@ -276,9 +373,15 @@ export default function PanneauxTable({ ctx }) {
 
               const possible = reqMode ? morceauxPossibles(r) : 0;
               const perte = reqMode ? perteOptimisation(r) : null;
+              const qtnTotal =
+                reqMode && Number.isFinite(Number(r.quantite))
+                  ? Number(r.quantite) * (Number(possible) || 0)
+                  : 0;
 
-              const rowBg = chosen
-                ? "#bff7c8"
+              const rowBg = confirmed
+                ? "#d9ffd4"
+                : chosen
+                ? "#fff8d8"
                 : checked
                 ? "#ffe66d"
                 : i % 2 === 1
@@ -551,6 +654,52 @@ export default function PanneauxTable({ ctx }) {
                     )}
                   </div>
 
+                  {reqMode ? (
+                    <>
+                      <div style={optCellStyle}>
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: 2,
+                            width: "100%",
+                            lineHeight: 1.15,
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: "#0b3a78",
+                              fontWeight: 1000,
+                              fontSize: 13,
+                            }}
+                          >
+                            x{possible || 0} morceaux
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={qtnTotalCellStyle}>
+                        {Number.isFinite(qtnTotal) ? qtnTotal : 0}
+                      </div>
+
+                      <div style={pertePanneauCellStyle}>
+                        {Number.isFinite(perte) ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 2,
+                              lineHeight: 1.15,
+                            }}
+                          >
+                            <div>{formatPerte(perte)}</div>
+                            <div style={{ fontSize: 10 }}>par panneau</div>
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </div>
+                    </>
+                  ) : null}
+
                   {showPrix ? (
                     <>
                       <div style={prixCellStyle}>{money(prix)}</div>
@@ -581,25 +730,21 @@ export default function PanneauxTable({ ctx }) {
                           <div
                             style={{
                               width: "100%",
-                              color: "#064f17",
+                              color: confirmed ? "#168000" : "#8a6d00",
                               fontWeight: 1000,
                               fontSize: 12,
                             }}
                           >
-                            Choisi
+                            {confirmed ? "Confirmé" : "Choisi"}
                           </div>
 
                           <input
+                            className="noNumberArrows"
                             type="number"
                             min={1}
                             value={reqQty}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              setReqQtyById((prev) => ({
-                                ...prev,
-                                [r.id]: Number.isFinite(v) ? v : 1,
-                              }));
-                            }}
+                            disabled={reqSaving}
+                            onChange={(e) => changeReqQty(r.id, e.target.value)}
                             style={{
                               width: 42,
                               height: 24,
@@ -607,74 +752,96 @@ export default function PanneauxTable({ ctx }) {
                               padding: 0,
                               textAlign: "center",
                               fontWeight: 900,
-                              border: "1px solid #888",
+                              border:
+                                qtyInvalid || qtyTooHigh
+                                  ? "2px solid #d33"
+                                  : confirmed
+                                  ? "2px solid #168000"
+                                  : "1px solid #888",
                               borderRadius: 4,
+                              background: "#fff",
                             }}
                             title="Quantité de panneaux à sortir"
                           />
 
-                          <button
-                            className="btn"
-                            style={{
-                              width: 56,
-                              height: 24,
-                              fontSize: 11,
-                              padding: 0,
-                              border: "1px solid #d33",
-                              background: "#fff",
-                              color: "#d33",
-                              fontWeight: 900,
-                            }}
-                            onClick={() => retirerPanneauReq(r.id)}
-                            title="Retirer"
-                          >
-                            Retirer
-                          </button>
+                          {confirmed ? (
+                            <div
+                              style={{
+                                minWidth: 72,
+                                height: 24,
+                                borderRadius: 6,
+                                border: "1px solid #168000",
+                                background: "#e8ffe5",
+                                color: "#168000",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: 11,
+                                fontWeight: 1000,
+                                padding: "0 5px",
+                                boxSizing: "border-box",
+                              }}
+                              title="Panneau confirmé"
+                            >
+                              ✓ Confirmé
+                            </div>
+                          ) : (
+                            <button
+                              className="btn"
+                              style={{
+                                width: 72,
+                                height: 24,
+                                fontSize: 11,
+                                padding: 0,
+                                border:
+                                  reqSaving || qtyInvalid || qtyTooHigh
+                                    ? "1px solid #aaa"
+                                    : "1px solid #168000",
+                                background:
+                                  reqSaving || qtyInvalid || qtyTooHigh
+                                    ? "#e5e7eb"
+                                    : "#168000",
+                                color:
+                                  reqSaving || qtyInvalid || qtyTooHigh
+                                    ? "#666"
+                                    : "#fff",
+                                fontWeight: 900,
+                                cursor:
+                                  reqSaving || qtyInvalid || qtyTooHigh
+                                    ? "not-allowed"
+                                    : "pointer",
+                              }}
+                              onClick={() => confirmerPanneauReq(r.id)}
+                              disabled={reqSaving || qtyInvalid || qtyTooHigh}
+                              title={
+                                qtyTooHigh
+                                  ? `Stock insuffisant. Stock: ${stock}`
+                                  : "Confirmer ce panneau"
+                              }
+                            >
+                              Confirmer
+                            </button>
+                          )}
                         </>
                       ) : (
-                        <>
-                          <div
-                            style={{
-                              width: "100%",
-                              color: "#0b3a78",
-                              fontWeight: 1000,
-                              fontSize: 12,
-                              lineHeight: 1.15,
-                            }}
-                          >
-                            x{possible || 0} morceaux
-                          </div>
-
-                          <div
-                            style={{
-                              width: "100%",
-                              color: "#555",
-                              fontWeight: 900,
-                              fontSize: 11,
-                              lineHeight: 1.15,
-                            }}
-                          >
-                            Perte {formatPerte(perte)}
-                          </div>
-
-                          <button
-                            className="btn"
-                            style={{
-                              width: 66,
-                              height: 24,
-                              fontSize: 11,
-                              padding: 0,
-                              border: "1px solid #168000",
-                              background: "#168000",
-                              color: "#fff",
-                              fontWeight: 900,
-                            }}
-                            onClick={() => choisirPanneauPourReq(r.id)}
-                            title="Choisir"
-                          >
-                            Choisir
-                          </button>
-                        </>
+                        <button
+                          className="btn"
+                          style={{
+                            width: 66,
+                            height: 24,
+                            fontSize: 11,
+                            padding: 0,
+                            border: "1px solid #168000",
+                            background: "#168000",
+                            color: "#fff",
+                            fontWeight: 900,
+                          }}
+                          onClick={() => choisirPanneauPourReq(r.id)}
+                          disabled={reqSaving}
+                          title="Choisir"
+                        >
+                          Choisir
+                        </button>
                       )
                     ) : isEditing ? (
                       <>

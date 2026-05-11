@@ -8,6 +8,9 @@ export default function MouluresExcelButton({ rows = [] }) {
       return;
     }
 
+    const ok = window.confirm("Êtes-vous sûr de vouloir créer le fichier Excel ?");
+    if (!ok) return;
+
     const data = rows.map((r) => ({
       Projet: r.projet || "",
       Date: r.date || "",

@@ -37,6 +37,9 @@ export default function PanneauxExcelButton({
       return;
     }
 
+    const ok = window.confirm("Êtes-vous sûr de vouloir créer le fichier Excel ?");
+    if (!ok) return;
+
     const mult = settings?.multipliers || {
       venteMin: 0.9,
       sugSans: 0.88,
@@ -73,7 +76,7 @@ export default function PanneauxExcelButton({
         "Longueur pieds": r.longueurPieds ?? "",
         "Longueur pouces": r.longueurPouces ?? "",
         "Largeur pouces": r.largeurPouces ?? "",
-        "Quantité": r.quantite ?? "",
+        Quantité: r.quantite ?? "",
         "Face extérieure": r.faceExterieure || "",
         "Face intérieure": r.faceInterieure || "",
         "Prix unitaire": moneyCell(prix),
