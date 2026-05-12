@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./pageRetourMateriaux.css";
 import DessinCanvas from "./DessinCanvas";
 import { db, storage, auth } from "./firebaseConfig";
@@ -13,12 +13,14 @@ import {
   deleteDoc,
   updateDoc,
   addDoc,
+  runTransaction,
 } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import MouluresExcelButton from "./MouluresExcelButton.jsx";
 import MouluresRequisitionManager from "./MouluresRequisitionManager.jsx";
 
 const SECTIONS_COUR = ["", "1", "2", "3", "4", "5", "6"];
+const NUMERO_COUNTER_DOC_ID = "banqueMouluresNumero";
 
 function currentUserInfo() {
   const user = auth?.currentUser || null;
@@ -59,6 +61,7 @@ function buildChanges(before, after, fields) {
 
 function moulureShortLabel(m) {
   return [
+    m.numeroMoulure ? `#${m.numeroMoulure}` : "",
     m.materiel || "Moulure",
     m.calibre ? `calibre ${m.calibre}` : "",
     m.quantite !== undefined && m.quantite !== "" ? `Qté ${m.quantite}` : "",
@@ -69,10 +72,49 @@ function moulureShortLabel(m) {
     .join(" ");
 }
 
+function getNumeroMoulure(row) {
+  const n = Number(row?.numeroMoulure ?? row?.numero ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : "";
+}
+
+function getMaxNumeroFromRows(rows) {
+  return rows.reduce((max, row) => {
+    const n = Number(getNumeroMoulure(row));
+    return Number.isFinite(n) && n > max ? n : max;
+  }, 0);
+}
+
+function formatPrix(value) {
+  if (value === undefined || value === null || value === "") return "—";
+
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return String(value);
+
+  return (
+    n.toLocaleString("fr-CA", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }) + " $"
+  );
+}
+
+function getCreatedMillis(row) {
+  const c = row?.createdAt;
+
+  if (!c) return 0;
+  if (typeof c.toMillis === "function") return c.toMillis();
+  if (typeof c.seconds === "number") return c.seconds * 1000;
+
+  return 0;
+}
+
 export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [banque, setBanque] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [modalUrl, setModalUrl] = useState(null);
+
+  const numeroAssignationRef = useRef(false);
 
   const [filters, setFilters] = useState({
     projet: "",
@@ -91,6 +133,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
   const [editForm, setEditForm] = useState({
     id: "",
+    numeroMoulure: "",
     projet: "",
     date: "",
     categorie: "",
@@ -98,6 +141,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     calibre: "",
     sectionCour: "",
     quantite: "",
+    prix: "",
     dessinUrl: "",
     dessinPath: "",
   });
@@ -108,6 +152,111 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   const [drawUndoSignal, setDrawUndoSignal] = useState(0);
   const [editNewDessinPng, setEditNewDessinPng] = useState(null);
 
+  async function getNextNumeroMoulure(rows) {
+    const counterRef = doc(
+      db,
+      "clients",
+      CLIENT_ID,
+      "counters",
+      NUMERO_COUNTER_DOC_ID
+    );
+
+    const maxDansTableau = getMaxNumeroFromRows(rows);
+
+    return await runTransaction(db, async (transaction) => {
+      const counterSnap = await transaction.get(counterRef);
+
+      const lastNumeroFirestore = counterSnap.exists()
+        ? Number(counterSnap.data()?.lastNumeroMoulure || 0)
+        : 0;
+
+      const base = Math.max(
+        Number.isFinite(lastNumeroFirestore) ? lastNumeroFirestore : 0,
+        maxDansTableau
+      );
+
+      const prochainNumero = base + 1;
+
+      transaction.set(
+        counterRef,
+        {
+          lastNumeroMoulure: prochainNumero,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      return prochainNumero;
+    });
+  }
+
+  async function assurerCompteurAuMoins(numero) {
+    const numeroNum = Number(numero);
+
+    if (!Number.isFinite(numeroNum) || numeroNum <= 0) return;
+
+    const counterRef = doc(
+      db,
+      "clients",
+      CLIENT_ID,
+      "counters",
+      NUMERO_COUNTER_DOC_ID
+    );
+
+    await runTransaction(db, async (transaction) => {
+      const counterSnap = await transaction.get(counterRef);
+
+      const lastNumeroFirestore = counterSnap.exists()
+        ? Number(counterSnap.data()?.lastNumeroMoulure || 0)
+        : 0;
+
+      if (!Number.isFinite(lastNumeroFirestore) || numeroNum > lastNumeroFirestore) {
+        transaction.set(
+          counterRef,
+          {
+            lastNumeroMoulure: numeroNum,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    });
+  }
+
+  async function assignerNumerosManquants(rows) {
+    if (numeroAssignationRef.current) return;
+
+    const rowsSansNumero = rows.filter((r) => !getNumeroMoulure(r));
+
+    if (rowsSansNumero.length === 0) return;
+
+    numeroAssignationRef.current = true;
+
+    try {
+      const aNumeroter = [...rowsSansNumero].sort((a, b) => {
+        const dateA = getCreatedMillis(a);
+        const dateB = getCreatedMillis(b);
+
+        if (dateA !== dateB) return dateA - dateB;
+
+        return String(a.id || "").localeCompare(String(b.id || ""));
+      });
+
+      for (const row of aNumeroter) {
+        const prochainNumero = await getNextNumeroMoulure(rows);
+
+        await updateDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", row.id), {
+          numeroMoulure: prochainNumero,
+          numeroMoulureCreatedAt: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.error("Erreur assignation numéros moulures:", e);
+    } finally {
+      numeroAssignationRef.current = false;
+    }
+  }
+
   useEffect(() => {
     const q = query(
       collection(db, "clients", CLIENT_ID, "banqueMoulures"),
@@ -116,7 +265,11 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
     const unsub = onSnapshot(
       q,
-      (snap) => setBanque(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setBanque(rows);
+        assignerNumerosManquants(rows);
+      },
       (err) => console.error(err)
     );
 
@@ -186,6 +339,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
     setEditForm({
       id: row.id || "",
+      numeroMoulure: getNumeroMoulure(row) || "",
       projet: row.projet || "",
       date: row.date || "",
       categorie: row.categorie || "",
@@ -193,6 +347,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       calibre: row.calibre || "",
       sectionCour: row.sectionCour || "",
       quantite: row.quantite ?? "",
+      prix: row.prix ?? "",
       dessinUrl: row.dessinUrl || "",
       dessinPath: row.dessinPath || "",
     });
@@ -217,6 +372,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
     setEditForm({
       id: "",
+      numeroMoulure: "",
       projet: "",
       date: "",
       categorie: "",
@@ -224,6 +380,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       calibre: "",
       sectionCour: "",
       quantite: "",
+      prix: "",
       dessinUrl: "",
       dessinPath: "",
     });
@@ -279,8 +436,23 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     return { dessinUrl, dessinPath };
   }
 
+  function numeroExisteDeja(numero, currentId) {
+    const n = Number(numero);
+
+    return banque.some((row) => {
+      if (row.id === currentId) return false;
+
+      const rowNum = Number(getNumeroMoulure(row));
+      return Number.isFinite(rowNum) && rowNum === n;
+    });
+  }
+
   async function confirmerModification() {
     const id = String(editForm.id || "").trim();
+
+    const numeroRaw = String(editForm.numeroMoulure ?? "").trim();
+    const numeroNum = Number(numeroRaw);
+
     const projet = String(editForm.projet || "").trim();
     const date = String(editForm.date || "").trim();
     const categorie = String(editForm.categorie || "").trim();
@@ -288,16 +460,36 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     const calibre = String(editForm.calibre || "").trim();
     const sectionCour = String(editForm.sectionCour || "").trim();
     const quantiteNum = Number(editForm.quantite);
+    const prixRaw = String(editForm.prix ?? "").trim();
+    const prixNum = prixRaw === "" ? "" : Number(prixRaw);
 
     if (!id) return setEditError("Document introuvable.");
+
+    if (!numeroRaw) {
+      return setEditError("Entre un numéro de moulure.");
+    }
+
+    if (!Number.isFinite(numeroNum) || numeroNum <= 0 || !Number.isInteger(numeroNum)) {
+      return setEditError("Le numéro doit être un nombre entier plus grand que 0.");
+    }
+
+    if (numeroExisteDeja(numeroNum, id)) {
+      return setEditError(`Le #${numeroNum} existe déjà sur une autre moulure.`);
+    }
+
     if (!projet) return setEditError("Entre un projet.");
     if (!date) return setEditError("Entre une date.");
     if (!categorie) return setEditError("Entre une catégorie.");
     if (!materiel) return setEditError("Entre un matériel.");
     if (!calibre) return setEditError("Entre un calibre.");
     if (!sectionCour) return setEditError("Choisis une section de cour.");
+
     if (!Number.isFinite(quantiteNum) || quantiteNum < 0) {
       return setEditError("Entre une quantité valide.");
+    }
+
+    if (prixRaw !== "" && (!Number.isFinite(prixNum) || prixNum < 0)) {
+      return setEditError("Entre un prix valide.");
     }
 
     const oldRow = oldRowBeforeEdit || banque.find((x) => x.id === id) || {};
@@ -313,6 +505,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       const { dessinUrl, dessinPath } = await uploadNewDessinIfNeeded(id);
 
       const newData = {
+        numeroMoulure: numeroNum,
         projet,
         date,
         categorie,
@@ -320,6 +513,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         calibre,
         sectionCour,
         quantite: quantiteNum,
+        prix: prixRaw === "" ? "" : prixNum,
         dessinUrl,
         dessinPath,
       };
@@ -330,6 +524,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
       };
 
       const compareFields = [
+        "numeroMoulure",
         "projet",
         "date",
         "categorie",
@@ -337,6 +532,7 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
         "calibre",
         "sectionCour",
         "quantite",
+        "prix",
         "dessinUrl",
       ];
 
@@ -356,6 +552,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
 
         updatedAt: serverTimestamp(),
       });
+
+      await assurerCompteurAuMoins(numeroNum);
 
       await addDoc(collection(db, "clients", CLIENT_ID, "historique"), {
         action: "moulure_modification",
@@ -393,13 +591,19 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
   async function supprimerMoulure(id) {
     if (!id) return;
 
+    const row = banque.find((x) => x.id === id);
+    const numeroAvantSuppression = getNumeroMoulure(row);
+
     const ok = window.confirm("Veux-tu vraiment supprimer cette moulure ?");
     if (!ok) return;
 
     setDeletingId(id);
 
     try {
+      await assurerCompteurAuMoins(numeroAvantSuppression);
+
       await deleteDoc(doc(db, "clients", CLIENT_ID, "banqueMoulures", id));
+
       if (selectedId === id) setSelectedId(null);
     } catch (e) {
       console.error(e);
@@ -409,8 +613,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     }
   }
 
-  const gridCols = "170px 130px 120px 170px 110px 110px 160px 220px";
-  const tableMinWidth = 1190;
+  const gridCols = "80px 170px 130px 120px 170px 110px 110px 160px 130px 220px";
+  const tableMinWidth = 1410;
 
   const filterInputStyle = {
     width: "100%",
@@ -424,6 +628,39 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     background: "#fff",
   };
 
+  const headerCellStyle = {
+    padding: "8px 6px",
+    display: "grid",
+    gap: 6,
+    alignContent: "center",
+    borderRight: "1px solid #e5eaf3",
+    minHeight: 66,
+    boxSizing: "border-box",
+  };
+
+  const headerTitleStyle = {
+    textAlign: "center",
+    fontWeight: 900,
+    fontSize: 13,
+    color: "#111827",
+    lineHeight: 1.15,
+  };
+
+  const simpleHeaderCellStyle = {
+    padding: "10px 6px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    borderRight: "1px solid #e5eaf3",
+    minHeight: 66,
+    boxSizing: "border-box",
+    fontWeight: 900,
+    fontSize: 13,
+    color: "#111827",
+    lineHeight: 1.15,
+  };
+
   return (
     <MouluresRequisitionManager
       banque={banque}
@@ -431,8 +668,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
     >
       {({
         reqMode,
-        reqError,
-        reqSaving,
         renderReqButtons,
         renderReqPanel,
         renderReqRowAction,
@@ -523,11 +758,11 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
               className="tableBox tableBox--full"
               style={{
                 minWidth: tableMinWidth,
-                border: reqMode ? "3px solid #1e5eff" : undefined,
+                border: reqMode ? "3px solid #1e5eff" : "1px solid #d7dde8",
                 boxShadow: reqMode
                   ? "0 0 0 9999px rgba(0,0,0,0.25), 0 18px 40px rgba(0,0,0,0.25)"
-                  : undefined,
-                borderRadius: reqMode ? 14 : undefined,
+                  : "0 10px 22px rgba(15,23,42,0.06)",
+                borderRadius: reqMode ? 14 : 12,
                 overflow: "hidden",
                 background: "#fff",
                 position: "relative",
@@ -538,21 +773,24 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                 style={{
                   display: "grid",
                   gridTemplateColumns: gridCols,
-                  alignItems: "center",
+                  alignItems: "stretch",
                   gap: 0,
-                  padding: "8px 8px",
-                  borderBottom: "1px solid #d9e2ef",
+                  padding: "0 8px",
+                  borderBottom: "2px solid #d9e2ef",
                   background: "#f6f9ff",
                   minWidth: tableMinWidth,
                 }}
               >
-                <div style={{ paddingRight: 8 }}>
+                <div style={simpleHeaderCellStyle}>#</div>
+
+                <div style={headerCellStyle}>
+                  <div style={headerTitleStyle}>Projet</div>
                   <select
                     value={filters.projet}
                     onChange={(e) => setFilterField("projet", e.target.value)}
                     style={filterInputStyle}
                   >
-                    <option value="">Projet</option>
+                    <option value="">Tous</option>
                     {projetOptions.map((v) => (
                       <option key={v} value={v}>
                         {v}
@@ -561,13 +799,14 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   </select>
                 </div>
 
-                <div style={{ paddingRight: 8 }}>
+                <div style={headerCellStyle}>
+                  <div style={headerTitleStyle}>Section cour</div>
                   <select
                     value={filters.sectionCour}
                     onChange={(e) => setFilterField("sectionCour", e.target.value)}
                     style={filterInputStyle}
                   >
-                    <option value="">Section cour</option>
+                    <option value="">Toutes</option>
                     {SECTIONS_COUR.filter(Boolean).map((s) => (
                       <option key={s} value={s}>
                         Section {s}
@@ -576,7 +815,8 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   </select>
                 </div>
 
-                <div style={{ paddingRight: 8 }}>
+                <div style={headerCellStyle}>
+                  <div style={headerTitleStyle}>Date</div>
                   <input
                     type="date"
                     value={filters.date}
@@ -585,13 +825,14 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   />
                 </div>
 
-                <div style={{ paddingRight: 8 }}>
+                <div style={headerCellStyle}>
+                  <div style={headerTitleStyle}>Matériel</div>
                   <select
                     value={filters.materiel}
                     onChange={(e) => setFilterField("materiel", e.target.value)}
                     style={filterInputStyle}
                   >
-                    <option value="">Matériel</option>
+                    <option value="">Tous</option>
                     {materielOptions.map((v) => (
                       <option key={v} value={v}>
                         {v}
@@ -600,13 +841,14 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   </select>
                 </div>
 
-                <div style={{ paddingRight: 8 }}>
+                <div style={headerCellStyle}>
+                  <div style={headerTitleStyle}>Calibre</div>
                   <select
                     value={filters.calibre}
                     onChange={(e) => setFilterField("calibre", e.target.value)}
                     style={{ ...filterInputStyle, textAlign: "center" }}
                   >
-                    <option value="">Calibre</option>
+                    <option value="">Tous</option>
                     {calibreOptions.map((v) => (
                       <option key={v} value={v}>
                         {v}
@@ -615,29 +857,31 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                   </select>
                 </div>
 
-                <div
-                  style={{
-                    textAlign: "center",
-                    color: "#777",
-                    fontSize: 12,
-                    fontWeight: 800,
-                  }}
-                >
-                  Quantité
+                <div style={simpleHeaderCellStyle}>Quantité</div>
+
+                <div style={simpleHeaderCellStyle}>Dessin</div>
+
+                <div style={simpleHeaderCellStyle}>
+                  Prix pour
+                  <br />
+                  inventaire
                 </div>
 
                 <div
                   style={{
-                    textAlign: "center",
-                    color: "#777",
-                    fontSize: 12,
-                    fontWeight: 800,
+                    padding: "8px 6px",
+                    display: "grid",
+                    gap: 6,
+                    alignContent: "center",
+                    justifyItems: "center",
+                    minHeight: 66,
+                    boxSizing: "border-box",
                   }}
                 >
-                  Dessin
-                </div>
+                  <div style={headerTitleStyle}>
+                    {reqActionHeader || "Actions"}
+                  </div>
 
-                <div style={{ display: "flex", justifyContent: "center" }}>
                   <button
                     onClick={clearFilters}
                     style={{
@@ -657,17 +901,6 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                 </div>
               </div>
 
-              <div className="tableHeader" style={{ gridTemplateColumns: gridCols }}>
-                <div>Projet</div>
-                <div>Section cour</div>
-                <div>Date</div>
-                <div>Matériel</div>
-                <div>Calibre</div>
-                <div>Quantité</div>
-                <div>Dessin</div>
-                <div style={{ textAlign: "center" }}>{reqActionHeader}</div>
-              </div>
-
               <div className="tableScroll">
                 {filteredBanque.length === 0 ? (
                   <div className="tableBody" style={{ padding: 10 }}>
@@ -676,8 +909,10 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                       : "(Aucun résultat avec les filtres)"}
                   </div>
                 ) : (
-                  filteredBanque.map((a) => {
+                  filteredBanque.map((a, idx) => {
                     const selected = a.id === selectedId;
+                    const numeroMoulure = getNumeroMoulure(a);
+                    const zebra = idx % 2 === 1;
 
                     return (
                       <div
@@ -688,13 +923,30 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                           gridTemplateColumns: gridCols,
                           alignItems: "center",
                           borderBottom: "1px solid #eee",
-                          background: getReqRowBackground(a, selected),
+                          background: getReqRowBackground
+                            ? getReqRowBackground(a, selected)
+                            : selected
+                            ? "#dfefff"
+                            : zebra
+                            ? "#fafafa"
+                            : "#fff",
                           cursor: "pointer",
                           padding: "6px 8px",
                           fontSize: 13,
                           minWidth: tableMinWidth,
+                          minHeight: 72,
                         }}
                       >
+                        <div
+                          style={{
+                            textAlign: "center",
+                            fontWeight: 900,
+                            color: "#1e293b",
+                          }}
+                        >
+                          {numeroMoulure ? `#${numeroMoulure}` : "—"}
+                        </div>
+
                         <div
                           style={{
                             fontWeight: 700,
@@ -710,9 +962,20 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                           {a.sectionCour || "—"}
                         </div>
 
-                        <div>{a.date || ""}</div>
-                        <div>{a.materiel || ""}</div>
+                        <div style={{ textAlign: "center" }}>{a.date || ""}</div>
+
+                        <div
+                          style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {a.materiel || ""}
+                        </div>
+
                         <div style={{ textAlign: "center" }}>{a.calibre || ""}</div>
+
                         <div style={{ textAlign: "center", fontWeight: 700 }}>
                           {a.quantite ?? ""}
                         </div>
@@ -741,6 +1004,16 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                           ) : (
                             <span style={{ color: "#999" }}>—</span>
                           )}
+                        </div>
+
+                        <div
+                          style={{
+                            textAlign: "center",
+                            fontWeight: 900,
+                            color: "#0f172a",
+                          }}
+                        >
+                          {formatPrix(a.prix)}
                         </div>
 
                         <div
@@ -935,6 +1208,29 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                     }}
                   >
                     <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ fontWeight: 800, fontSize: 13 }}>
+                        # Moulure
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={editForm.numeroMoulure}
+                        onChange={(e) =>
+                          setEditField("numeroMoulure", e.target.value)
+                        }
+                        style={{
+                          height: 38,
+                          borderRadius: 10,
+                          border: "1px solid #ddd",
+                          padding: "0 10px",
+                          fontSize: 13,
+                          fontWeight: 900,
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: "grid", gap: 6 }}>
                       <div style={{ fontWeight: 800, fontSize: 13 }}>Projet</div>
                       <input
                         value={editForm.projet}
@@ -1043,6 +1339,27 @@ export default function PageTableauMoulure({ onRetour, onGoRequisition }) {
                         min={0}
                         value={editForm.quantite}
                         onChange={(e) => setEditField("quantite", e.target.value)}
+                        style={{
+                          height: 38,
+                          borderRadius: 10,
+                          border: "1px solid #ddd",
+                          padding: "0 10px",
+                          fontSize: 13,
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ fontWeight: 800, fontSize: 13 }}>
+                        Prix pour inventaire
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={editForm.prix}
+                        onChange={(e) => setEditField("prix", e.target.value)}
+                        placeholder="Ex: 12.50"
                         style={{
                           height: 38,
                           borderRadius: 10,

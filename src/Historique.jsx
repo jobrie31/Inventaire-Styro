@@ -6,6 +6,8 @@ import {
   onSnapshot,
   orderBy,
   query,
+  doc,
+  deleteDoc,
 } from "firebase/firestore";
 
 const HISTORIQUE_START_DATE = new Date("2026-05-04T00:00:00");
@@ -37,191 +39,6 @@ function tsMillis(ts) {
   }
 }
 
-function sameTime(a, b) {
-  const ta = tsMillis(a);
-  const tb = tsMillis(b);
-  if (!ta || !tb) return false;
-  return Math.abs(ta - tb) < 2000;
-}
-
-function fmtLongueur(pieds, pouces) {
-  const p = pieds === null || pieds === undefined || pieds === "" ? "" : String(pieds);
-  const po =
-    pouces === null || pouces === undefined || pouces === "" ? "0" : String(pouces);
-
-  if (!p) return "";
-  return `${p} pi ${po} po`;
-}
-
-function panneauLabel(p, options = {}) {
-  const showQuantite = options.showQuantite !== false;
-
-  return [
-    p.type || "Panneau",
-    p.epaisseurPouces ? `${p.epaisseurPouces}"` : "",
-    p.fabricant || "",
-    fmtLongueur(p.longueurPieds, p.longueurPouces),
-    p.largeurPouces ? `x ${p.largeurPouces} po` : "",
-    p.sectionCour ? `Section ${p.sectionCour}` : "",
-    p.projet ? `Projet ${p.projet}` : "",
-    p.profile ? `Profile ${p.profile}` : "",
-    p.modele ? `Modèle ${p.modele}` : "",
-    p.fini ? `Fini ${p.fini}` : "",
-    p.faceExterieure ? `Face ext. ${p.faceExterieure}` : "",
-    p.faceInterieure ? `Face int. ${p.faceInterieure}` : "",
-    showQuantite && p.quantite !== undefined && p.quantite !== "" ? `Qté ${p.quantite}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function moulureLabel(m, options = {}) {
-  const showQuantite = options.showQuantite !== false;
-
-  return [
-    m.materiel || "Moulure",
-    m.calibre ? `calibre ${m.calibre}` : "",
-    m.sectionCour ? `Section ${m.sectionCour}` : "",
-    m.projet ? `Projet ${m.projet}` : "",
-    showQuantite && m.quantite !== undefined && m.quantite !== "" ? `Qté ${m.quantite}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function reqItemsLabel(req) {
-  const items = Array.isArray(req.items) ? req.items : [];
-
-  if (items.length === 0) return "aucun item demandé";
-
-  const isPanneaux = req.type === "panneaux" || req.collectionType === "panneaux";
-
-  return items
-    .map((it, index) => {
-      const qty = it.quantiteDemande ?? "";
-      const prefix = `Ligne ${index + 1} — Demandé ${qty || "?"} x`;
-
-      if (isPanneaux) {
-        const label = panneauLabel(
-          {
-            projet: it.projetSource || "",
-            sectionCour: it.sectionCour || "",
-            type: it.type || "",
-            epaisseurPouces: it.epaisseurPouces || "",
-            fabricant: it.fabricant || "",
-            profile: it.profile || "",
-            modele: it.modele || "",
-            fini: it.fini || "",
-            longueurPieds: it.longueurPieds ?? "",
-            longueurPouces: it.longueurPouces ?? "",
-            largeurPouces: it.largeurPouces ?? "",
-            faceExterieure: it.faceExterieure || "",
-            faceInterieure: it.faceInterieure || "",
-          },
-          { showQuantite: false }
-        );
-
-        const stockTxt =
-          it.quantiteStockAvant !== undefined && it.quantiteStockApres !== undefined
-            ? `Stock ${it.quantiteStockAvant} → ${it.quantiteStockApres}`
-            : it.quantiteStockAvant !== undefined
-            ? `Stock avant ${it.quantiteStockAvant}`
-            : "";
-
-        return [prefix, label, stockTxt].filter(Boolean).join(" — ");
-      }
-
-      const label = moulureLabel(
-        {
-          projet: it.projetSource || "",
-          sectionCour: it.sectionCour || "",
-          materiel: it.materiel || "",
-          calibre: it.calibre || "",
-        },
-        { showQuantite: false }
-      );
-
-      const stockTxt =
-        it.quantiteStockAvant !== undefined && it.quantiteStockApres !== undefined
-          ? `Stock ${it.quantiteStockAvant} → ${it.quantiteStockApres}`
-          : it.quantiteStockAvant !== undefined
-          ? `Stock avant ${it.quantiteStockAvant}`
-          : "";
-
-      return [prefix, label, stockTxt].filter(Boolean).join(" — ");
-    })
-    .join(" | ");
-}
-
-function reqRestantsLabel(req) {
-  const restants = Array.isArray(req.restants) ? req.restants : [];
-  const restantsCrees = restants.filter((x) => x && x.cree);
-
-  if (restantsCrees.length === 0) {
-    return "Aucun restant remis dans le tableau panneaux";
-  }
-
-  return restantsCrees
-    .map((x, index) => {
-      const qty = x.quantiteRestante ?? "";
-      const label = panneauLabel(
-        {
-          projet: req.projetEnvoye || x.projetSource || "",
-          sectionCour: x.sectionCour || "",
-          type: x.type || "",
-          epaisseurPouces: x.epaisseurPouces || "",
-          fabricant: x.fabricant || "",
-          profile: x.profile || "",
-          modele: x.modele || "",
-          fini: x.fini || "",
-          longueurPieds: x.longueurPieds ?? "",
-          longueurPouces: x.longueurPouces ?? "",
-          largeurPouces: x.largeurPouces ?? "",
-          faceExterieure: x.faceExterieure || "",
-          faceInterieure: x.faceInterieure || "",
-        },
-        { showQuantite: false }
-      );
-
-      return `Restant ${index + 1} — Remis ${qty || "?"} x — ${label}`;
-    })
-    .join(" | ");
-}
-
-function userFromDoc(doc, mode = "created") {
-  if (mode === "updated") {
-    return (
-      doc.updatedByName ||
-      doc.updatedByEmail ||
-      doc.modifiedByName ||
-      doc.modifiedByEmail ||
-      doc.userName ||
-      doc.userEmail ||
-      "Utilisateur non enregistré"
-    );
-  }
-
-  if (mode === "completed") {
-    return (
-      doc.completedByName ||
-      doc.completedByEmail ||
-      doc.updatedByName ||
-      doc.updatedByEmail ||
-      doc.userName ||
-      doc.userEmail ||
-      "Utilisateur non enregistré"
-    );
-  }
-
-  return (
-    doc.createdByName ||
-    doc.createdByEmail ||
-    doc.userName ||
-    doc.userEmail ||
-    "Utilisateur non enregistré"
-  );
-}
-
 function actionColor(action) {
   const a = String(action || "").toLowerCase();
 
@@ -245,14 +62,10 @@ function moduleLabel(module) {
   return module || "";
 }
 
-function normalizeStatus(req) {
-  if (!req) return "";
-  if (req.collectionType === "panneaux" && req.status === "brouillon") return "demande";
-  return req.status || "demande";
-}
-
 function prettyFieldName(key) {
   const map = {
+    numeroMoulure: "#",
+    prix: "Prix",
     projet: "Projet",
     projetSource: "Projet source",
     projetEnvoye: "Projet envoyé",
@@ -297,6 +110,7 @@ function formatDiffValue(v) {
 
   if (typeof v === "object") {
     if (v?.toDate) return fmtTS(v);
+
     try {
       return JSON.stringify(v);
     } catch {
@@ -396,6 +210,7 @@ function getDiffRowsFromRecord(record) {
     return Object.keys(rawChanges)
       .map((field) => {
         const c = rawChanges[field] || {};
+
         return {
           field,
           before:
@@ -469,14 +284,10 @@ function isModificationRow(row) {
 
 export default function Historique({ onRetour }) {
   const [logs, setLogs] = useState([]);
-  const [panneaux, setPanneaux] = useState([]);
-  const [moulures, setMoulures] = useState([]);
-  const [reqPanneaux, setReqPanneaux] = useState([]);
-  const [reqMoulures, setReqMoulures] = useState([]);
-
   const [selectedId, setSelectedId] = useState(null);
   const [filtreModule, setFiltreModule] = useState("");
   const [filtreTexte, setFiltreTexte] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     const q = query(
@@ -505,258 +316,16 @@ export default function Historique({ onRetour }) {
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    const q = query(
-      collection(db, "clients", CLIENT_ID, "banquePanneaux"),
-      orderBy("createdAt", "desc")
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setPanneaux(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      },
-      (err) => {
-        console.error("Erreur banquePanneaux:", err);
-        setPanneaux([]);
-      }
-    );
-
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, "clients", CLIENT_ID, "banqueMoulures"),
-      orderBy("createdAt", "desc")
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setMoulures(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      },
-      (err) => {
-        console.error("Erreur banqueMoulures:", err);
-        setMoulures([]);
-      }
-    );
-
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, "clients", CLIENT_ID, "requisitionsPanneaux"),
-      orderBy("createdAt", "desc")
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setReqPanneaux(
-          snap.docs.map((d) => ({
-            id: d.id,
-            collectionType: "panneaux",
-            ...d.data(),
-          }))
-        );
-      },
-      (err) => {
-        console.error("Erreur requisitionsPanneaux:", err);
-        setReqPanneaux([]);
-      }
-    );
-
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, "clients", CLIENT_ID, "requisitionsMoulures"),
-      orderBy("createdAt", "desc")
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setReqMoulures(
-          snap.docs.map((d) => ({
-            id: d.id,
-            collectionType: "moulures",
-            ...d.data(),
-          }))
-        );
-      },
-      (err) => {
-        console.error("Erreur requisitionsMoulures:", err);
-        setReqMoulures([]);
-      }
-    );
-
-    return () => unsub();
-  }, []);
-
-  const virtualRows = useMemo(() => {
-    const out = [];
-
-    panneaux.forEach((p) => {
-      if (p.createdAt) {
-        out.push({
-          id: `panneau-ajout-${p.id}`,
-          source: "auto",
-          createdAt: p.createdAt,
-          action: "panneau_ajout",
-          titre: "Panneau ajouté",
-          module: "panneaux",
-          cibleId: p.id,
-          cibleType: "banquePanneaux",
-          description: `Panneau ajouté : ${panneauLabel(p)}`,
-          userName: userFromDoc(p, "created"),
-          userEmail: p.createdByEmail || p.userEmail || "",
-          details: p,
-        });
-      }
-
-      if (p.updatedAt && !sameTime(p.updatedAt, p.createdAt)) {
-        out.push({
-          id: `panneau-modif-${p.id}`,
-          source: "auto",
-          createdAt: p.updatedAt,
-          action: "panneau_modification",
-          titre: "Panneau modifié",
-          module: "panneaux",
-          cibleId: p.id,
-          cibleType: "banquePanneaux",
-          description: `Panneau modifié : ${panneauLabel(p)}`,
-          userName: userFromDoc(p, "updated"),
-          userEmail: p.updatedByEmail || p.userEmail || "",
-          details: p,
-        });
-      }
-    });
-
-    moulures.forEach((m) => {
-      if (m.createdAt) {
-        out.push({
-          id: `moulure-ajout-${m.id}`,
-          source: "auto",
-          createdAt: m.createdAt,
-          action: "moulure_ajout",
-          titre: "Moulure ajoutée",
-          module: "moulures",
-          cibleId: m.id,
-          cibleType: "banqueMoulures",
-          description: `Moulure ajoutée : ${moulureLabel(m)}`,
-          userName: userFromDoc(m, "created"),
-          userEmail: m.createdByEmail || m.userEmail || "",
-          details: m,
-        });
-      }
-
-      if (m.updatedAt && !sameTime(m.updatedAt, m.createdAt)) {
-        out.push({
-          id: `moulure-modif-${m.id}`,
-          source: "auto",
-          createdAt: m.updatedAt,
-          action: "moulure_modification",
-          titre: "Moulure modifiée",
-          module: "moulures",
-          cibleId: m.id,
-          cibleType: "banqueMoulures",
-          description: `Moulure modifiée : ${moulureLabel(m)}`,
-          userName: userFromDoc(m, "updated"),
-          userEmail: m.updatedByEmail || m.userEmail || "",
-          details: m,
-        });
-      }
-    });
-
-    reqPanneaux.forEach((r) => {
-      if (r.createdAt) {
-        const demandeExacte = reqItemsLabel({
-          ...r,
-          collectionType: "panneaux",
-        });
-
-        out.push({
-          id: `reqpan-creation-${r.id}`,
-          source: "auto",
-          createdAt: r.createdAt,
-          action: "requisition_panneaux_creation",
-          titre: "Réquisition panneaux créée",
-          module: "requisitions",
-          cibleId: r.id,
-          cibleType: "requisitionsPanneaux",
-          description: `Réquisition ${r.reqId || r.id} créée — ${demandeExacte}`,
-          userName: userFromDoc(r, "created"),
-          userEmail: r.createdByEmail || r.userEmail || "",
-          details: r,
-        });
-      }
-
-      if (normalizeStatus(r) === "terminée" && r.completedAt) {
-        const demandeExacte = reqItemsLabel({
-          ...r,
-          collectionType: "panneaux",
-        });
-
-        const remisExact = reqRestantsLabel(r);
-
-        out.push({
-          id: `reqpan-terminee-${r.id}`,
-          source: "auto",
-          createdAt: r.completedAt,
-          action: "requisition_panneaux_terminee",
-          titre: "Réquisition panneaux terminée",
-          module: "requisitions",
-          cibleId: r.id,
-          cibleType: "requisitionsPanneaux",
-          description: `Réquisition ${r.reqId || r.id} terminée — Demandé: ${demandeExacte} — Remis dans le tableau: ${remisExact}`,
-          userName: userFromDoc(r, "completed"),
-          userEmail: r.completedByEmail || r.updatedByEmail || r.userEmail || "",
-          details: r,
-        });
-      }
-    });
-
-    reqMoulures.forEach((r) => {
-      if (r.createdAt) {
-        const demandeExacte = reqItemsLabel({
-          ...r,
-          collectionType: "moulures",
-        });
-
-        out.push({
-          id: `reqmoul-creation-${r.id}`,
-          source: "auto",
-          createdAt: r.createdAt,
-          action: "requisition_moulures_creation",
-          titre: "Réquisition moulures créée",
-          module: "requisitions",
-          cibleId: r.id,
-          cibleType: "requisitionsMoulures",
-          description: `Réquisition ${r.reqId || r.id} créée — ${demandeExacte}`,
-          userName: userFromDoc(r, "created"),
-          userEmail: r.createdByEmail || r.userEmail || "",
-          details: r,
-        });
-      }
-    });
-
-    return out;
-  }, [panneaux, moulures, reqPanneaux, reqMoulures]);
-
   const rows = useMemo(() => {
     const normalizedLogs = logs.map((r) => ({
       ...r,
       userName: r.userName || r.userEmail || "Utilisateur non enregistré",
     }));
 
-    return [...normalizedLogs, ...virtualRows].sort((a, b) => {
+    return [...normalizedLogs].sort((a, b) => {
       return tsMillis(b.createdAt) - tsMillis(a.createdAt);
     });
-  }, [logs, virtualRows]);
+  }, [logs]);
 
   const modules = useMemo(() => {
     return [
@@ -804,7 +373,31 @@ export default function Historique({ onRetour }) {
     return getDiffRowsFromRecord(selected);
   }, [selected]);
 
-  const cols = "170px 150px 230px 1fr 240px";
+  async function supprimerHistoriqueRow(row, e) {
+    e.stopPropagation();
+
+    if (!row?.realId) return;
+
+    const ok = window.confirm("Veux-tu vraiment supprimer cette ligne de l’historique ?");
+    if (!ok) return;
+
+    setDeletingId(row.id);
+
+    try {
+      await deleteDoc(doc(db, "clients", CLIENT_ID, "historique", row.realId));
+
+      if (selectedId === row.id) {
+        setSelectedId(null);
+      }
+    } catch (err) {
+      console.error("Erreur suppression historique:", err);
+      alert("Erreur lors de la suppression de l’historique.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const cols = "170px 150px 230px 1fr 240px 46px";
   const diffCols = "220px 1fr 1fr";
 
   const detailHeaderCell = {
@@ -956,18 +549,24 @@ export default function Historique({ onRetour }) {
           <div style={{ padding: "10px 8px", borderRight: "1px solid #315c93" }}>
             Date
           </div>
+
           <div style={{ padding: "10px 8px", borderRight: "1px solid #315c93" }}>
             Module
           </div>
+
           <div style={{ padding: "10px 8px", borderRight: "1px solid #315c93" }}>
             Action
           </div>
+
           <div style={{ padding: "10px 8px", borderRight: "1px solid #315c93" }}>
             Description exacte
           </div>
-          <div style={{ padding: "10px 8px" }}>
+
+          <div style={{ padding: "10px 8px", borderRight: "1px solid #315c93" }}>
             Fait par
           </div>
+
+          <div style={{ padding: "10px 8px", textAlign: "center" }}>✕</div>
         </div>
 
         <div
@@ -984,6 +583,7 @@ export default function Historique({ onRetour }) {
             filtered.map((r, idx) => {
               const isSel = r.id === selectedId;
               const zebra = idx % 2 === 1;
+              const isDeleting = deletingId === r.id;
 
               return (
                 <div
@@ -1052,6 +652,7 @@ export default function Historique({ onRetour }) {
                   <div
                     style={{
                       padding: "9px 8px",
+                      borderRight: "1px solid #eee",
                       fontWeight: 800,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -1064,6 +665,39 @@ export default function Historique({ onRetour }) {
                     title={r.userName || r.userEmail || ""}
                   >
                     {r.userName || r.userEmail || "Utilisateur non enregistré"}
+                  </div>
+
+                  <div
+                    style={{
+                      padding: "6px 6px",
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                    }}
+                  >
+                    <button
+                      onClick={(e) => supprimerHistoriqueRow(r, e)}
+                      disabled={isDeleting}
+                      title="Supprimer cette ligne"
+                      style={{
+                        width: 25,
+                        height: 25,
+                        borderRadius: 999,
+                        border: "1px solid #d33",
+                        background: isDeleting ? "#ffd6d6" : "#fff",
+                        color: "#d33",
+                        fontWeight: 900,
+                        fontSize: 15,
+                        lineHeight: "20px",
+                        cursor: isDeleting ? "default" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                      }}
+                    >
+                      {isDeleting ? "…" : "×"}
+                    </button>
                   </div>
                 </div>
               );
@@ -1119,17 +753,17 @@ export default function Historique({ onRetour }) {
             </div>
 
             <div style={{ fontWeight: 900 }}>Fait par</div>
-            <div>{selected.userName || selected.userEmail || "Utilisateur non enregistré"}</div>
+            <div>
+              {selected.userName ||
+                selected.userEmail ||
+                "Utilisateur non enregistré"}
+            </div>
 
             <div style={{ fontWeight: 900 }}>Email</div>
             <div>{selected.userEmail || ""}</div>
 
             <div style={{ fontWeight: 900 }}>Source</div>
-            <div>
-              {selected.source === "auto"
-                ? "Déduit automatiquement depuis les documents"
-                : "Journal historique"}
-            </div>
+            <div>Journal historique</div>
           </div>
 
           {isModificationRow(selected) ? (

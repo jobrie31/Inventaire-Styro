@@ -4,9 +4,21 @@ import DessinCanvas from "./DessinCanvas";
 
 import { db, storage, auth } from "./firebaseConfig";
 import { CLIENT_ID } from "./appClient";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  doc,
+  runTransaction,
+  getDocs,
+  query,
+  orderBy,
+  limit,
+} from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import zoneTerrainPanneaux from "./assets/zone-terrain-panneaux.png";
+
+const NUMERO_COUNTER_DOC_ID = "banqueMouluresNumero";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -56,6 +68,7 @@ export default function PageRetourMateriaux() {
     function onResize() {
       setViewportW(window.innerWidth);
     }
+
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -125,6 +138,66 @@ export default function PageRetourMateriaux() {
     ...articleBaseCell,
     borderRight: "none",
   };
+
+  async function getMaxNumeroMoulureExistant() {
+    try {
+      const q = query(
+        collection(db, "clients", CLIENT_ID, "banqueMoulures"),
+        orderBy("numeroMoulure", "desc"),
+        limit(1)
+      );
+
+      const snap = await getDocs(q);
+
+      if (snap.empty) return 0;
+
+      const data = snap.docs[0].data();
+      const n = Number(data?.numeroMoulure || 0);
+
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch (err) {
+      console.error("Erreur lecture max numeroMoulure:", err);
+      return 0;
+    }
+  }
+
+  async function getNextNumeroMoulure() {
+    const maxNumeroExistant = await getMaxNumeroMoulureExistant();
+
+    const counterRef = doc(
+      db,
+      "clients",
+      CLIENT_ID,
+      "counters",
+      NUMERO_COUNTER_DOC_ID
+    );
+
+    return await runTransaction(db, async (transaction) => {
+      const counterSnap = await transaction.get(counterRef);
+
+      const lastNumeroCounter = counterSnap.exists()
+        ? Number(counterSnap.data()?.lastNumeroMoulure || 0)
+        : 0;
+
+      const base = Math.max(
+        Number.isFinite(lastNumeroCounter) ? lastNumeroCounter : 0,
+        Number.isFinite(maxNumeroExistant) ? maxNumeroExistant : 0
+      );
+
+      const prochainNumero = base + 1;
+
+      transaction.set(
+        counterRef,
+        {
+          lastNumeroMoulure: prochainNumero,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      return prochainNumero;
+    });
+  }
 
   function resetForm() {
     setQteStock("");
@@ -212,7 +285,10 @@ export default function PageRetourMateriaux() {
         return alert("Entre le fabricant (Autre).");
       }
 
-      if (!isPosNumberStr(pLongPieds)) return alert("Entre une longueur (pieds) valide (> 0).");
+      if (!isPosNumberStr(pLongPieds)) {
+        return alert("Entre une longueur (pieds) valide (> 0).");
+      }
+
       const lp = Number(String(pLongPieds).trim());
 
       const longPoucesStr = String(pLongPouces ?? "").trim();
@@ -286,6 +362,8 @@ export default function PageRetourMateriaux() {
         const storageFolder = isPanneaux ? "banquePanneaux" : "banqueMoulures";
         const firestoreCollection = isPanneaux ? "banquePanneaux" : "banqueMoulures";
 
+        const numeroMoulure = !isPanneaux ? await getNextNumeroMoulure() : null;
+
         if (!isPanneaux && a.dessinPng) {
           const isWebp = a.dessinPng.startsWith("data:image/webp");
           const ext = isWebp ? "webp" : "jpg";
@@ -322,6 +400,8 @@ export default function PageRetourMateriaux() {
         };
 
         if (a.categorie === "Moulures") {
+          payload.numeroMoulure = numeroMoulure;
+          payload.numeroMoulureCreatedAt = serverTimestamp();
           payload.materiel = a.materiel;
           payload.calibre = a.calibre;
           payload.sectionCour = a.sectionCour;
@@ -452,7 +532,9 @@ export default function PageRetourMateriaux() {
             </select>
 
             <div className="fieldRow" style={{ marginTop: isIPad ? 10 : 16 }}>
-              <div style={{ fontSize: layout.labelFontBig, fontWeight: 700, width: 75 }}>Date:</div>
+              <div style={{ fontSize: layout.labelFontBig, fontWeight: 700, width: 75 }}>
+                Date:
+              </div>
               <input
                 className="inputSmall"
                 style={{ width: 125 }}
@@ -611,7 +693,9 @@ export default function PageRetourMateriaux() {
                       </option>
                     ))}
                   </select>
-                  <div style={{ fontWeight: 700, fontSize: isIPad ? 12 : undefined }}>Pouces</div>
+                  <div style={{ fontWeight: 700, fontSize: isIPad ? 12 : undefined }}>
+                    Pouces
+                  </div>
                 </div>
 
                 <div className="fieldRow" style={{ marginTop: 12, alignItems: "center" }}>
@@ -800,7 +884,11 @@ export default function PageRetourMateriaux() {
                 minWidth: 0,
               }}
             >
-              {!categorie ? <div className="canvasPlaceholder">Choisis une catégorie</div> : <div />}
+              {!categorie ? (
+                <div className="canvasPlaceholder">Choisis une catégorie</div>
+              ) : (
+                <div />
+              )}
             </div>
           )}
 
@@ -838,7 +926,10 @@ export default function PageRetourMateriaux() {
                 <button
                   className="btn"
                   onClick={() => setUndoSignal((n) => n + 1)}
-                  style={{ fontSize: isIPad ? 12 : undefined, padding: isIPad ? "6px 4px" : undefined }}
+                  style={{
+                    fontSize: isIPad ? 12 : undefined,
+                    padding: isIPad ? "6px 4px" : undefined,
+                  }}
                 >
                   ↩ Retour
                 </button>
@@ -846,7 +937,10 @@ export default function PageRetourMateriaux() {
                 <button
                   className="btn"
                   onClick={() => setClearSignal((n) => n + 1)}
-                  style={{ fontSize: isIPad ? 12 : undefined, padding: isIPad ? "6px 4px" : undefined }}
+                  style={{
+                    fontSize: isIPad ? 12 : undefined,
+                    padding: isIPad ? "6px 4px" : undefined,
+                  }}
                 >
                   🗑️ Effacer dessin
                 </button>
